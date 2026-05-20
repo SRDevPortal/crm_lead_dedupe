@@ -8,7 +8,7 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        files: "lead_dedupe.*"
+        files: "crm_lead_dedupe.*"
         exclude: ".*json$|.*txt$|.*csv|.*md|.*svg"
       - id: check-merge-conflict
       - id: check-ast
@@ -38,11 +38,11 @@ repos:
         # Ignore any files that might contain jinja / bundles
         exclude: |
             (?x)^(
-                lead_dedupe/public/dist/.*|
+                crm_lead_dedupe/public/dist/.*|
                 .*node_modules.*|
                 .*boilerplate.*|
-                lead_dedupe/templates/includes/.*|
-                lead_dedupe/public/js/lib/.*
+                crm_lead_dedupe/templates/includes/.*|
+                crm_lead_dedupe/public/js/lib/.*
             )$
 
 
@@ -55,15 +55,16 @@ repos:
         # Ignore any files that might contain jinja / bundles
         exclude: |
             (?x)^(
-                lead_dedupe/public/dist/.*|
+                crm_lead_dedupe/public/dist/.*|
                 cypress/.*|
                 .*node_modules.*|
                 .*boilerplate.*|
-                lead_dedupe/templates/includes/.*|
-                lead_dedupe/public/js/lib/.*
+                crm_lead_dedupe/templates/includes/.*|
+                crm_lead_dedupe/public/js/lib/.*
             )$
 
 ci:
     autoupdate_schedule: weekly
     skip: []
     submodules: false
+

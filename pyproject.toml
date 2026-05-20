@@ -1,5 +1,5 @@
 [project]
-name = "lead_dedupe"
+name = "crm_lead_dedupe"
 description = "Duplicate detection + merge for Lead"
 authors = [
     { name = "Sriaas", email = "webdevelopersriaas@gmail.com"}

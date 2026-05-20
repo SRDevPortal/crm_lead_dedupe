@@ -1,4 +1,4 @@
-### Lead Dedupe
+### CRM Lead Dedupe
 
 Duplicate detection + merge for Lead
 
@@ -9,7 +9,7 @@ You can install this app using the [bench](https://github.com/frappe/bench) CLI:
 ```bash
 cd $PATH_TO_YOUR_BENCH
 bench get-app $URL_OF_THIS_REPO --branch develop
-bench install-app lead_dedupe
+bench install-app crm_lead_dedupe
 ```
 
 ### Contributing
@@ -17,7 +17,7 @@ bench install-app lead_dedupe
 This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:
 
 ```bash
-cd apps/lead_dedupe
+cd apps/crm_lead_dedupe
 pre-commit install
 ```
 
@@ -31,3 +31,4 @@ Pre-commit is configured to use the following tools for checking and formatting 
 ### License
 
 mit
+
