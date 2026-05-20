@@ -10,15 +10,25 @@ function _ld_clean(t) {
 function _ld_css_block() {
   return `
   <style>
-    .ld-wrap { padding: 16px; }
+    .modal-dialog.ld-full-modal { width: min(1480px, calc(100vw - 96px)); max-width: none; margin: 48px auto; }
+    .modal-dialog.ld-full-modal .modal-content { height: auto; max-height: calc(100vh - 96px); display: flex; flex-direction: column; }
+    .modal-dialog.ld-full-modal .modal-body { flex: 1; min-height: 0; overflow: hidden; padding: 0; }
+    .ld-wrap { max-height: calc(100vh - 170px); display: flex; flex-direction: column; padding: 16px; }
+    .ld-head { flex: 0 0 auto; }
     .ld-head { margin: 0 0 10px; padding: 0 0 8px; border-bottom: 1px solid #eee; }
     .ld-muted { color: #666; }
+    .ld-table-wrap { flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain; }
     .ld-table { width: 100%; border-collapse: collapse; }
     .ld-table th, .ld-table td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
-    .ld-table th { font-weight: 600; white-space: nowrap; }
+    .ld-table th { font-weight: 600; white-space: nowrap; position: sticky; top: 0; z-index: 1; background: #fff; }
     .ld-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eef3ff; border: 1px solid #dbe3ff; }
-    .ld-actions { position: sticky; bottom: 0; z-index: 1; background: #fff; padding: 10px 16px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
+    .ld-actions { flex: 0 0 auto; background: #fff; padding: 10px 0 0; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
     .ld-row-subtle { color: #444; font-size: 12px; }
+    @media (max-width: 768px) {
+      .modal-dialog.ld-full-modal { width: 100vw; height: 100vh; margin: 0; }
+      .modal-dialog.ld-full-modal .modal-content { height: 100vh; border-radius: 0; }
+      .ld-wrap { max-height: calc(100vh - 58px); padding: 12px; }
+    }
     @media (max-width: 992px) {
       .ld-hide-md { display: none; }
     }
@@ -51,23 +61,25 @@ function _ld_table_rows(rows) {
 
 function _ld_build_table(rows) {
   return `
-    <table class="ld-table">
-      <thead>
-        <tr>
-          <th style="width:34px"></th>
-          <th>Lead Id</th>
-          <th class="ld-hide-md">Owner</th>
-          <th>Stage</th>
-          <th class="ld-hide-md">Creation</th>
-          <th>Mobile</th>
-          <th>Full Name</th>
-          <th class="ld-hide-md">Platform</th>
-          <th>Source</th>
-          <th style="text-align:right">Score</th>
-        </tr>
-      </thead>
-      <tbody>${_ld_table_rows(rows)}</tbody>
-    </table>
+    <div class="ld-table-wrap">
+      <table class="ld-table">
+        <thead>
+          <tr>
+            <th style="width:34px"></th>
+            <th>Lead Id</th>
+            <th class="ld-hide-md">Owner</th>
+            <th>Stage</th>
+            <th class="ld-hide-md">Creation</th>
+            <th>Mobile</th>
+            <th>Full Name</th>
+            <th class="ld-hide-md">Platform</th>
+            <th>Source</th>
+            <th style="text-align:right">Score</th>
+          </tr>
+        </thead>
+        <tbody>${_ld_table_rows(rows)}</tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -83,8 +95,7 @@ async function openCRMLeadDuplicatesDialog({ primary_name }) {
     });
 
     const $dlg = d.$wrapper.find(".modal-dialog");
-    $dlg.addClass("modal-xl");
-    d.$wrapper.find(".modal-body").css({ maxHeight: "80vh", overflow: "auto", paddingBottom: 0 });
+    $dlg.addClass("ld-full-modal");
 
     d.$body.html("<div style='padding:16px' class='text-muted'>Loading duplicates...</div>");
     d.show();
