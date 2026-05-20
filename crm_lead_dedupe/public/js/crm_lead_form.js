@@ -67,6 +67,10 @@ frappe.ui.form.on('CRM Lead', {
         if (!window.openCRMLeadDuplicatesDialog) {
           await new Promise(resolve => frappe.require('/assets/crm_lead_dedupe/js/crm_lead_modal.js', resolve));
         }
+        if (!window.openCRMLeadDuplicatesDialog) {
+          frappe.msgprint('Could not load duplicate dialog. Please clear cache and try again.');
+          return;
+        }
         window.openCRMLeadDuplicatesDialog({ primary_name: frm.doc.name });
       }).addClass('btn-danger text-dark');
     }
