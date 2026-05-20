@@ -50,10 +50,6 @@ doc_events = {
     }
 }
 
-# Patches
-# Create crm_lead_dedupe/patches.txt with the line below:
-# crm_lead_dedupe.patches.v15_add_mobile_pipeline_index
-
 # Apps
 # ------------------
 
