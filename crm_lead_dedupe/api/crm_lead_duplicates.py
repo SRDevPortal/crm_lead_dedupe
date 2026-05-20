@@ -64,3 +64,45 @@ def get_duplicates_for_crm_lead(lead_name: str):
     rows.sort(key=lambda x: (x.get("score", 0), x.get("creation") or ""), reverse=True)
     return rows
 
+
+@frappe.whitelist()
+def get_hit_counts_for_crm_leads(lead_names):
+    names = _as_list(lead_names)
+    if not names:
+        return {"success": True, "result": {}}
+
+    rows = frappe.get_all(
+        "CRM Lead",
+        filters={"name": ["in", names]},
+        fields=["name", "mobile_no", "sr_mobile_norm"],
+        limit_page_length=0,
+    )
+
+    result = {name: {"hit_count": 0} for name in names}
+    for row in rows:
+        mobile_norm = row.sr_mobile_norm or norm_mobile(row.mobile_no)
+        if not mobile_norm:
+            continue
+
+        hit_count = frappe.db.count(
+            "CRM Lead",
+            {
+                "sr_mobile_norm": mobile_norm,
+                "name": ["!=", row.name],
+            },
+        )
+        result[row.name] = {"hit_count": hit_count}
+
+    return {"success": True, "result": result}
+
+
+def _as_list(value):
+    if isinstance(value, str):
+        try:
+            value = frappe.parse_json(value)
+        except Exception:
+            value = [value]
+    if not isinstance(value, list):
+        return []
+    return [item.get("name") if isinstance(item, dict) else item for item in value if item]
+
