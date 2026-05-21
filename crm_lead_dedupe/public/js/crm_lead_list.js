@@ -1,9 +1,43 @@
 // apps/crm_lead_dedupe/crm_lead_dedupe/public/js/crm_lead_list.js
-frappe.listview_settings['CRM Lead'] = {
-  // Make sure these come back in the list row payload
-  add_fields: ['sr_dup_hit_count', 'lead_name'],
+(function () {
+  const doctype = 'CRM Lead';
+  const existingSettings = frappe.listview_settings[doctype] || {};
+  const existingOnload = existingSettings.onload;
+  const existingRefresh = existingSettings.refresh;
+  const dedupeFields = ['sr_dup_hit_count', 'sr_dup_unseen_hit', 'lead_name'];
 
-  onload(listview) {
+  frappe.listview_settings[doctype] = {
+    ...existingSettings,
+    add_fields: Array.from(new Set([...(existingSettings.add_fields || []), ...dedupeFields])),
+
+    onload(listview) {
+      if (typeof existingOnload === 'function') {
+        existingOnload(listview);
+      }
+      installCRMLeadDedupeList(listview);
+    },
+
+    refresh(listview) {
+      if (typeof existingRefresh === 'function') {
+        existingRefresh(listview);
+      }
+      if (listview.crm_lead_dedupe_decorate) {
+        listview.crm_lead_dedupe_decorate();
+      }
+    },
+
+    // Don't try to inject HTML into "lead_name" formatter; it gets escaped by Frappe.
+    formatters: {
+      ...(existingSettings.formatters || {}),
+    },
+  };
+
+  function installCRMLeadDedupeList(listview) {
+    if (listview.crm_lead_dedupe_installed) {
+      return;
+    }
+    listview.crm_lead_dedupe_installed = true;
+
     window.crm_lead_dedupe_open_duplicates = async function (name) {
       if (!name) return;
       if (!window.openCRMLeadDuplicatesDialog) {
@@ -20,18 +54,13 @@ frappe.listview_settings['CRM Lead'] = {
       await window.crm_lead_dedupe_open_duplicates(name);
     }
 
-    // 1) Hide archived by default (add only once)
-    const hasArchived = (listview.filter_area.get() || []).some(f => f[1] === 'sr_is_archived');
-    if (!hasArchived) {
-      listview.filter_area.add([['CRM Lead', 'sr_is_archived', '=', 0]]);
-      listview.run(); // apply immediately
-    }
+    removeArchivedFilterFromRoute(listview);
 
-    // 2) Prefer duplicates first
+    // 1) Prefer duplicates first
     listview.sort_by = 'sr_dup_hit_count';
     listview.sort_order = 'desc';
 
-    // 3) Minimal CSS for a compact pill
+    // 2) Minimal CSS for a compact pill
     if (!document.getElementById('sr-hit-btn-style')) {
       const style = document.createElement('style');
       style.id = 'sr-hit-btn-style';
@@ -47,11 +76,22 @@ frappe.listview_settings['CRM Lead'] = {
           appearance:none;
         }
         .sr-hit-btn:hover{ background:#ffec99; }
+        @keyframes sr-dup-row-flash {
+          0%, 100% { background: #fff; }
+          50% { background: #fff3cd; }
+        }
+        .list-row.sr-dup-flash,
+        .list-row.sr-dup-flash .list-row-col {
+          animation: sr-dup-row-flash 1.4s ease-in-out infinite;
+        }
+        .list-row.sr-dup-flash {
+          box-shadow: inset 3px 0 0 #f5a623;
+        }
       `;
       document.head.appendChild(style);
     }
 
-    // 4) Capture hit clicks before the list row navigation can consume them.
+    // 3) Capture hit clicks before the list row navigation can consume them.
     if (!window.crm_lead_dedupe_hit_capture_installed) {
       window.crm_lead_dedupe_hit_capture_installed = true;
       document.addEventListener('click', (event) => {
@@ -65,7 +105,7 @@ frappe.listview_settings['CRM Lead'] = {
       }, true);
     }
 
-    // 5) Delegated click fallback for older event paths.
+    // 4) Delegated click fallback for older event paths.
     listview.$result.off('click.crm_lead_dedupe', '.sr-hit-btn');
     listview.$result.on('click.crm_lead_dedupe', '.sr-hit-btn', async (e) => {
       e.preventDefault();
@@ -89,7 +129,7 @@ frappe.listview_settings['CRM Lead'] = {
       };
     }
 
-    // 6) Refresh hit counts from server, then decorate visible rows.
+    // 5) Refresh hit counts from server, then decorate visible rows.
     function refreshHitCounts() {
       const names = (listview.data || []).map(doc => doc.name).filter(Boolean);
       if (!names.length) return;
@@ -122,8 +162,15 @@ frappe.listview_settings['CRM Lead'] = {
 
         $subject.find('.sr-hit-btn').remove();
 
-        const serverCount = counts[doc.name] && counts[doc.name].hit_count;
+        const server = counts[doc.name] || {};
+        const serverCount = server.hit_count;
         const hits = cint(serverCount || doc.sr_dup_hit_count || 0);
+        const unseenHit = cint(
+          Object.prototype.hasOwnProperty.call(server, 'unseen_hit')
+            ? server.unseen_hit
+            : (doc.sr_dup_unseen_hit || 0)
+        );
+        $row.toggleClass('sr-dup-flash', Boolean(unseenHit));
         if (!hits) return;
 
         const text = hits === 1 ? '1 Hit' : `${hits} Hits`;
@@ -172,15 +219,27 @@ frappe.listview_settings['CRM Lead'] = {
     if (typeof listview.on === 'function') {
       listview.on('refresh', scheduleHitRefresh);
     }
-  },
+  }
+})();
 
-  refresh(listview) {
-    if (listview.crm_lead_dedupe_decorate) {
-      listview.crm_lead_dedupe_decorate();
-    }
-  },
+function removeArchivedFilterFromRoute(listview) {
+  stripArchivedQueryParam();
 
-  // Don't try to inject HTML into "lead_name" formatter; it gets escaped by Frappe.
-  formatters: {}
-};
+  const hasArchivedFilter = (listview.filter_area.get() || [])
+    .some(filter => filter[1] === 'sr_is_archived');
+  if (!hasArchivedFilter) return;
+
+  listview.filter_area.remove('sr_is_archived').then(() => {
+    stripArchivedQueryParam();
+  });
+}
+
+function stripArchivedQueryParam() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('sr_is_archived')) return;
+
+  url.searchParams.delete('sr_is_archived');
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState(window.history.state, '', nextUrl);
+}
 
