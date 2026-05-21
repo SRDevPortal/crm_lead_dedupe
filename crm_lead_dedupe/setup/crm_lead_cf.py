@@ -1,7 +1,12 @@
 # apps/crm_lead_dedupe/crm_lead_dedupe/setup/crm_lead_cf.py
 import frappe
 
-from crm_lead_dedupe.leads.dup_utils import norm_mobile, recompute_hit_counts
+from crm_lead_dedupe.leads.dup_utils import (
+    DUPLICATE_OF_FIELD,
+    LEGACY_DUPLICATE_OF_FIELD,
+    norm_mobile,
+    sync_duplicate_group,
+)
 
 DT = "CRM Lead"
 CUSTOM_FIELDS = [
@@ -17,10 +22,9 @@ CUSTOM_FIELDS = [
         "read_only": 1,
     },
     {
-        "fieldname": "sr_duplicate_of",
-        "label": "Duplicate Of",
-        "fieldtype": "Link",
-        "options": "CRM Lead",
+        "fieldname": DUPLICATE_OF_FIELD,
+        "label": "Duplicate Of (Name)",
+        "fieldtype": "Data",
         "insert_after": "sr_mobile_norm",
         "hidden": 1,
         "read_only": 1,
@@ -29,7 +33,7 @@ CUSTOM_FIELDS = [
         "fieldname": "sr_duplicate_score",
         "label": "Duplicate Score",
         "fieldtype": "Float",
-        "insert_after": "sr_duplicate_of",
+        "insert_after": DUPLICATE_OF_FIELD,
         "default": 0,
         "hidden": 1,
         "read_only": 1,
@@ -41,6 +45,7 @@ CUSTOM_FIELDS = [
         "insert_after": "sr_duplicate_score",
         "hidden": 1,
         "default": 0,
+        "read_only": 1,
     },
     {
         "fieldname": "sr_dup_candidates_json",
@@ -48,6 +53,7 @@ CUSTOM_FIELDS = [
         "fieldtype": "Small Text",
         "insert_after": "sr_is_duplicate",
         "hidden": 1,
+        "read_only": 1,
     },
     {
         "fieldname": "sr_dup_hit_count",
@@ -56,13 +62,31 @@ CUSTOM_FIELDS = [
         "insert_after": "sr_dup_candidates_json",
         "default": 0,
         "hidden": 1,
+        "read_only": 1,
+    },
+    {
+        "fieldname": "sr_dup_unseen_hit",
+        "label": "Unseen Duplicate Hit",
+        "fieldtype": "Check",
+        "insert_after": "sr_dup_hit_count",
+        "default": 0,
+        "hidden": 1,
+        "read_only": 1,
+    },
+    {
+        "fieldname": "sr_dup_unseen_hit_on",
+        "label": "Unseen Duplicate Hit On",
+        "fieldtype": "Datetime",
+        "insert_after": "sr_dup_unseen_hit",
+        "hidden": 1,
+        "read_only": 1,
     },
     {
         "fieldname": "sr_is_archived",
         "label": "Archived (Hidden)",
         "fieldtype": "Check",
         "default": "0",
-        "insert_after": "sr_dup_hit_count",
+        "insert_after": "sr_dup_unseen_hit_on",
         "in_list_view": 0,
         "in_standard_filter": 0,
         "read_only": 1,
@@ -76,20 +100,33 @@ def apply():
 
     changed = False
 
-    def add_cf(df):
+    def sync_cf(df):
         nonlocal changed
-        if not frappe.db.exists("Custom Field", {"dt": DT, "fieldname": df["fieldname"]}):
+        existing = frappe.db.get_value("Custom Field", {"dt": DT, "fieldname": df["fieldname"]}, "name")
+        if not existing:
             cf = frappe.get_doc({"doctype": "Custom Field", "dt": DT, **df})
             cf.insert(ignore_permissions=True)
             changed = True
+            return
+
+        cf = frappe.get_doc("Custom Field", existing)
+        field_changed = False
+        for key, value in df.items():
+            if cf.get(key) != value:
+                cf.set(key, value)
+                field_changed = True
+        if field_changed:
+            cf.save(ignore_permissions=True)
+            changed = True
 
     for df in CUSTOM_FIELDS:
-        add_cf(df)
+        sync_cf(df)
 
     if changed:
         frappe.clear_cache(doctype=DT)
 
     ensure_indexes()
+    clear_legacy_duplicate_links()
     backfill_mobile_norm()
     return True
 
@@ -108,9 +145,11 @@ def backfill_mobile_norm():
     if not frappe.db.has_column(DT, "mobile_no") or not frappe.db.has_column(DT, "sr_mobile_norm"):
         return
 
+    has_pipeline = frappe.db.has_column(DT, "sr_lead_pipeline")
+    pipeline_select = ", sr_lead_pipeline" if has_pipeline else ""
     rows = frappe.db.sql(
-        """
-        select name, mobile_no, sr_mobile_norm
+        f"""
+        select name, mobile_no, sr_mobile_norm {pipeline_select}
         from `tabCRM Lead`
         where ifnull(mobile_no, '') != ''
         order by creation asc
@@ -124,7 +163,7 @@ def backfill_mobile_norm():
         if not mobile_norm:
             continue
 
-        mobile_groups.add(mobile_norm)
+        mobile_groups.add((mobile_norm, row.get("sr_lead_pipeline") if has_pipeline else None))
         if row.sr_mobile_norm != mobile_norm:
             frappe.db.set_value(
                 DT,
@@ -137,10 +176,10 @@ def backfill_mobile_norm():
     if not frappe.db.has_column(DT, "sr_dup_hit_count"):
         return
 
-    for mobile_norm in mobile_groups:
-        recompute_hit_counts(mobile_norm)
+    for mobile_norm, pipeline in mobile_groups:
+        sync_duplicate_group(mobile_norm, pipeline)
 
-    if not frappe.db.has_column(DT, "sr_lead_pipeline"):
+    if not has_pipeline:
         return
 
     try:
@@ -151,4 +190,17 @@ def backfill_mobile_norm():
         )
     except Exception:
         pass
+
+
+def clear_legacy_duplicate_links():
+    if not frappe.db.has_column(DT, LEGACY_DUPLICATE_OF_FIELD):
+        return
+
+    frappe.db.sql(
+        f"""
+        update `tab{DT}`
+        set `{LEGACY_DUPLICATE_OF_FIELD}` = null
+        where ifnull(`{LEGACY_DUPLICATE_OF_FIELD}`, '') != ''
+        """
+    )
 
