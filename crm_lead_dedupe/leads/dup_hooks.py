@@ -1,8 +1,12 @@
-# apps/crm_lead_dedupe/crm_lead_dedupe/leads/dup_hooks.py
-
-import json
 import frappe
-from .dup_utils import norm_mobile, find_dup_candidates, score_duplicate, recompute_hit_counts
+from .dup_utils import (
+    DUPLICATE_OF_FIELD,
+    LEGACY_DUPLICATE_OF_FIELD,
+    DUPLICATE_THRESHOLD,
+    find_dup_candidates,
+    norm_mobile,
+    score_duplicate,
+)
 
 
 # -------------------------
@@ -13,71 +17,60 @@ def _is_newest_in_group(doc) -> bool:
     """True if this doc is the newest for the normalized mobile group."""
     if not getattr(doc, "sr_mobile_norm", None):
         return False
+    filters = {"sr_mobile_norm": doc.sr_mobile_norm}
+    if doc.get("sr_lead_pipeline") and frappe.db.has_column(doc.doctype, "sr_lead_pipeline"):
+        filters["sr_lead_pipeline"] = doc.get("sr_lead_pipeline")
     newest = frappe.db.get_value(
         "CRM Lead",
-        {"sr_mobile_norm": doc.sr_mobile_norm},
+        filters,
         "name",
         order_by="creation desc",
     )
     return newest == doc.name
 
 
-def _mobile_changed(doc) -> bool:
-    """Detect change in normalized mobile on updates."""
+def _old_group_key(doc):
     if doc.is_new():
-        return True
-    old_mobile = frappe.db.get_value(doc.doctype, doc.name, "sr_mobile_norm")
-    return old_mobile != doc.sr_mobile_norm
+        return None
+
+    fields = ["sr_mobile_norm"]
+    if frappe.db.has_column(doc.doctype, "sr_lead_pipeline"):
+        fields.append("sr_lead_pipeline")
+
+    old = frappe.db.get_value(doc.doctype, doc.name, fields, as_dict=True)
+    if not old or not old.get("sr_mobile_norm"):
+        return None
+
+    return (old.get("sr_mobile_norm"), old.get("sr_lead_pipeline"))
 
 
-def _archive_older_dups(doc):
-    """
-    Archive older leads within the normalized mobile group.
-    Keep newest un-archived.
-    """
-    if not doc.sr_mobile_norm:
-        return
+def _store_old_group_key(doc):
+    old_key = _old_group_key(doc)
+    current_key = (doc.sr_mobile_norm, doc.get("sr_lead_pipeline"))
+    if old_key and old_key != current_key:
+        doc.flags.crm_lead_dedupe_old_group_key = old_key
+        return old_key
+    return None
 
-    rows = frappe.get_all(
-        "CRM Lead",
-        filters={"sr_mobile_norm": doc.sr_mobile_norm},
-        fields=["name", "creation"],
-        order_by="creation desc",
-    )
-    if not rows:
-        return
 
-    newest = rows[0]["name"]
-    updates = [
-        {
-            "doctype": "CRM Lead",
-            "name": r["name"],
-            "fieldname": "sr_is_archived",
-            "value": 0 if r["name"] == newest else 1,
-        }
-        for r in rows
-    ]
-    if not updates:
-        return
+def _get_duplicate_of(doc) -> str:
+    return (doc.get(DUPLICATE_OF_FIELD) or doc.get(LEGACY_DUPLICATE_OF_FIELD) or "").strip()
 
-    try:
-        frappe.db.bulk_update(doc_updates=updates, update_modified=False)
-    except Exception:
-        for u in updates:
-            frappe.db.set_value(
-                u["doctype"], u["name"], u["fieldname"], u["value"], update_modified=False
-            )
+
+def _set_duplicate_of(doc, value: str | None = None):
+    if hasattr(doc, DUPLICATE_OF_FIELD):
+        doc.set(DUPLICATE_OF_FIELD, value)
+    if hasattr(doc, LEGACY_DUPLICATE_OF_FIELD):
+        doc.set(LEGACY_DUPLICATE_OF_FIELD, None)
 
 
 def _clear_dup_link(doc):
     """
     Clear sr_duplicate_of if:
       - it points to a non-existent record
-      - it points to an archived record (hidden by PQC)
       - this doc is the newest (primary) in group
-    Also set doc.flags.ignore_links = True when clearing to avoid LinkValidationError.
     """
-    dup = (doc.get("sr_duplicate_of") or "").strip()
+    dup = _get_duplicate_of(doc)
     if not dup:
         return
 
@@ -85,15 +78,7 @@ def _clear_dup_link(doc):
     if not frappe.db.exists("CRM Lead", dup):
         # prevent link validation from firing before we clear it
         doc.flags.ignore_links = True
-        doc.sr_duplicate_of = None
-        doc.sr_is_duplicate = 0
-        doc.sr_duplicate_score = 0
-        return
-
-    # Target archived (typically filtered by your PQC)
-    if frappe.db.get_value("CRM Lead", dup, "sr_is_archived"):
-        doc.flags.ignore_links = True
-        doc.sr_duplicate_of = None
+        _set_duplicate_of(doc)
         doc.sr_is_duplicate = 0
         doc.sr_duplicate_score = 0
         return
@@ -102,7 +87,7 @@ def _clear_dup_link(doc):
     if doc.name and _is_newest_in_group(doc):
         # not strictly necessary to skip validation here, because target exists,
         # but we clear it to keep the primary clean
-        doc.sr_duplicate_of = None
+        _set_duplicate_of(doc)
         doc.sr_is_duplicate = 0
         doc.sr_duplicate_score = 0
 
@@ -112,15 +97,9 @@ def _clear_dup_link(doc):
 # -------------------------
 
 def on_before_validate(doc, method=None):
-    """
-    Runs *before* Frappe link validation.
-    Ensure mobile is normalized (used by _is_newest_in_group) and clear bad link.
-    """
-    # make sure normalization exists for the primary test
+    """Normalize mobile early for controller and hook logic."""
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
-    _clear_dup_link(doc)                 # clears bad sr_duplicate_of
-    # sets doc.flags.ignore_links = True when needed to bypass validation
-    frappe.logger().info(f"before_validate clearing check for {doc.name} dup={doc.get('sr_duplicate_of')}")
+    _clear_dup_link(doc)
 
 
 def on_validate(doc, method=None):
@@ -135,48 +114,47 @@ def on_before_save(doc, method=None):
     - Find/score candidates with the same normalized mobile
     - Set duplicate flags on non-primary rows
     - Maintain JSON summary for quick debug
-    - Archive older rows in group when mobile changes
-    - Recompute hit counts for the entire group (so list pills are always fresh)
+    - Store old group key so post-save sync can repair both old and new groups
     """
     # Normalize mobile
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
+    old_key = _store_old_group_key(doc)
 
-    # Find candidates (same normalized mobile, excluding self)
-    cands = find_dup_candidates(doc.sr_mobile_norm, exclude_name=doc.name)
+    cands = find_dup_candidates(
+        doc.sr_mobile_norm,
+        exclude_name=doc.name,
+        pipeline=doc.get("sr_lead_pipeline"),
+    )
+    duplicate_cands = []
 
     # Score and pick best
     best, best_score = None, 0.0
     for c in cands:
         sc = score_duplicate(doc, c)
+        if sc >= DUPLICATE_THRESHOLD:
+            duplicate_cands.append(c)
         if sc > best_score:
             best, best_score = c, sc
 
     # Primary (newest) should NOT be marked duplicate
     doc_is_primary = bool(doc.name) and _is_newest_in_group(doc)
 
-    if not doc_is_primary and best and best_score >= 70:
+    if not doc_is_primary and best and best_score >= DUPLICATE_THRESHOLD:
         doc.sr_is_duplicate = 1
-        doc.sr_duplicate_of = best["name"]
+        _set_duplicate_of(doc, best["name"])
         doc.sr_duplicate_score = best_score
     else:
         doc.sr_is_duplicate = 0
-        doc.sr_duplicate_of = None
+        _set_duplicate_of(doc)
         doc.sr_duplicate_score = best_score or 0
-
     # quick stats / debug
-    doc.sr_dup_hit_count = len(cands)
+    doc.sr_dup_hit_count = len(duplicate_cands)
     doc.sr_dup_candidates_json = None
-    if cands:
+    doc.flags.crm_lead_dedupe_mark_unseen_hit = bool(
+        duplicate_cands and (doc.is_new() or old_key)
+    )
+    if duplicate_cands:
         try:
-            doc.sr_dup_candidates_json = json.dumps(cands[:5], default=str)
+            doc.sr_dup_candidates_json = frappe.as_json(duplicate_cands[:5])
         except Exception:
             pass
-
-    # archive if group changed
-    if _mobile_changed(doc):
-        _archive_older_dups(doc)
-
-    # always refresh the group's hit counts so list shows correct pills
-    if doc.sr_mobile_norm:
-        recompute_hit_counts(doc.sr_mobile_norm)
-
