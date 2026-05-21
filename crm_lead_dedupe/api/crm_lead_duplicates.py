@@ -1,43 +1,153 @@
-# apps/crm_lead_dedupe/crm_lead_dedupe/api/crm_lead_duplicates.py
 import frappe
-from crm_lead_dedupe.leads.dup_utils import norm_mobile, find_dup_candidates, score_duplicate
+from frappe.utils import cint
+from crm_lead_dedupe.leads.dup_utils import (
+    DUPLICATE_THRESHOLD,
+    find_dup_candidates,
+    norm_mobile,
+    score_duplicate,
+)
+from crm_lead_dedupe.leads.perm import (
+    can_customize_modal_columns,
+    can_manage_dedupe,
+    require_lead_read,
+)
 
-def _summary(name: str) -> dict:
+DT = "CRM Lead"
+
+DEFAULT_MODAL_COLUMNS = (
+    "name",
+    "owner",
+    "stage",
+    "creation",
+    "mobile_no",
+    "lead_name",
+    "platform",
+    "source",
+    "score",
+)
+
+MODAL_COLUMN_FIELDS = {
+    "name": ("name",),
+    "owner": ("owner",),
+    "stage": ("status", "sr_lead_disposition"),
+    "creation": ("creation",),
+    "mobile_no": ("mobile_no",),
+    "lead_name": ("lead_name",),
+    "platform": ("sr_lead_platform",),
+    "source": ("source",),
+    "score": (),
+    "pipeline": ("sr_lead_pipeline",),
+    "disposition": ("sr_lead_disposition",),
+    "team": ("team",),
+    "lead_owner": ("lead_owner",),
+    "country": ("sr_lead_country",),
+    "email": ("email",),
+    "phone": ("phone",),
+    "lead_score": ("lead_score",),
+    "lead_temperature": ("lead_temperature",),
+    "landing_page": ("sr_landing_page",),
+    "utm_source": ("sr_utm_source",),
+    "utm_campaign": ("sr_utm_campaign",),
+    "utm_medium": ("sr_utm_medium",),
+    "utm_term": ("sr_utm_term",),
+    "gclid": ("sr_gclid",),
+}
+
+
+def normalize_modal_columns(columns=None) -> list[str]:
+    keys = _as_column_list(columns) if columns else list(DEFAULT_MODAL_COLUMNS)
+
+    normalized = []
+    for key in keys:
+        if isinstance(key, dict):
+            key = key.get("key")
+        if key in MODAL_COLUMN_FIELDS and key not in normalized:
+            normalized.append(key)
+
+    if not normalized:
+        normalized = list(DEFAULT_MODAL_COLUMNS)
+    if "name" not in normalized:
+        normalized.insert(0, "name")
+
+    return normalized
+
+
+def get_allowed_modal_columns() -> list[str]:
+    return list(MODAL_COLUMN_FIELDS)
+
+
+def get_effective_modal_columns(columns=None, user=None) -> list[str]:
+    if can_customize_modal_columns(user):
+        return normalize_modal_columns(columns)
+    return list(DEFAULT_MODAL_COLUMNS)
+
+
+def _as_column_list(value):
+    if isinstance(value, str):
+        try:
+            value = frappe.parse_json(value)
+        except Exception:
+            value = [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if item]
+
+
+def _db_fields_for_columns(columns) -> list[str]:
+    fields = ["name"]
+    for key in normalize_modal_columns(columns):
+        for fieldname in MODAL_COLUMN_FIELDS[key]:
+            if fieldname not in fields and frappe.db.has_column(DT, fieldname):
+                fields.append(fieldname)
+    return fields
+
+
+def _column_value(key: str, row):
+    if key == "stage":
+        return row.get("sr_lead_disposition") or row.get("status")
+    if key == "platform":
+        return row.get("sr_lead_platform")
+    if key == "pipeline":
+        return row.get("sr_lead_pipeline")
+    if key == "disposition":
+        return row.get("sr_lead_disposition")
+    if key == "country":
+        return row.get("sr_lead_country")
+    if key == "landing_page":
+        return row.get("sr_landing_page")
+    if key == "utm_source":
+        return row.get("sr_utm_source")
+    if key == "utm_campaign":
+        return row.get("sr_utm_campaign")
+    if key == "utm_medium":
+        return row.get("sr_utm_medium")
+    if key == "utm_term":
+        return row.get("sr_utm_term")
+    if key == "gclid":
+        return row.get("sr_gclid")
+    return row.get(key)
+
+
+def _summary(name: str, columns=None) -> dict:
     """
     Fast, permission-agnostic fetch for just the fields we need in the modal.
     Using frappe.db.get_value bypasses PQC/permissions, so duplicates still show
     even if some are archived/hidden in the list.
     """
+    column_keys = normalize_modal_columns(columns)
     row = frappe.db.get_value(
-        "CRM Lead",
+        DT,
         name,
-        [
-            "name",
-            "owner",
-            "status",
-            "sr_lead_disposition",
-            "creation",
-            "mobile_no",
-            "lead_name",
-            "sr_lead_platform",
-            "source",
-        ],
+        _db_fields_for_columns(column_keys),
         as_dict=True,
     ) or {}
 
-    return {
-        "name": row.get("name"),
-        "owner": row.get("owner"),
-        "stage": row.get("sr_lead_disposition") or row.get("status"),
-        "creation": row.get("creation"),
-        "mobile_no": row.get("mobile_no"),
-        "lead_name": row.get("lead_name"),
-        "platform": row.get("sr_lead_platform"),
-        "source": row.get("source"),
-    }
+    summary = {key: _column_value(key, row) for key in column_keys if key != "score"}
+    summary["name"] = row.get("name") or name
+    return summary
 
 @frappe.whitelist()
-def get_duplicates_for_crm_lead(lead_name: str):
+def get_duplicates_for_crm_lead(lead_name: str, columns=None):
     """
     Duplicates by normalized mobile, excluding the primary.
     Returns columns: Lead Id, Owner, Stage, Creation, Mobile, Full Name,
@@ -46,17 +156,28 @@ def get_duplicates_for_crm_lead(lead_name: str):
     if not lead_name:
         return []
 
+    require_lead_read(lead_name)
     lead = frappe.get_doc("CRM Lead", lead_name)
     m = norm_mobile(lead.mobile_no or "")
 
     if not m:
         return []
 
+    column_keys = get_effective_modal_columns(columns)
     rows = []
     # find_dup_candidates should already return names for the same mobile
-    for c in find_dup_candidates(m, exclude_name=lead.name, limit=50):
+    for c in find_dup_candidates(
+        m,
+        exclude_name=lead.name,
+        limit=50,
+        pipeline=lead.get("sr_lead_pipeline"),
+    ):
         s = score_duplicate(lead, c)
-        r = _summary(c["name"])
+        if s < DUPLICATE_THRESHOLD:
+            continue
+        if not can_manage_dedupe() and not frappe.has_permission("CRM Lead", "read", c["name"]):
+            continue
+        r = _summary(c["name"], column_keys)
         r["score"] = s if s is not None else 100
         rows.append(r)
 
@@ -71,29 +192,58 @@ def get_hit_counts_for_crm_leads(lead_names):
     if not names:
         return {"success": True, "result": {}}
 
+    result = {name: {"hit_count": 0, "unseen_hit": 0} for name in names}
     rows = frappe.get_all(
         "CRM Lead",
         filters={"name": ["in", names]},
-        fields=["name", "mobile_no", "sr_mobile_norm"],
+        fields=_count_fields(),
         limit_page_length=0,
     )
 
-    result = {name: {"hit_count": 0} for name in names}
     for row in rows:
+        if not frappe.has_permission("CRM Lead", "read", row.name):
+            continue
+
         mobile_norm = row.sr_mobile_norm or norm_mobile(row.mobile_no)
         if not mobile_norm:
             continue
 
-        hit_count = frappe.db.count(
-            "CRM Lead",
-            {
-                "sr_mobile_norm": mobile_norm,
-                "name": ["!=", row.name],
-            },
+        candidates = find_dup_candidates(
+            mobile_norm,
+            exclude_name=row.name,
+            pipeline=row.get("sr_lead_pipeline"),
         )
-        result[row.name] = {"hit_count": hit_count}
+        candidates = [
+            c for c in candidates
+            if score_duplicate(row, c) >= DUPLICATE_THRESHOLD
+        ]
+        if not can_manage_dedupe():
+            candidates = [
+                c for c in candidates
+                if frappe.has_permission("CRM Lead", "read", c["name"])
+            ]
+        hit_count = len(candidates)
+        result[row.name] = {
+            "hit_count": hit_count,
+            "unseen_hit": cint(row.get("sr_dup_unseen_hit")),
+        }
 
     return {"success": True, "result": result}
+
+
+@frappe.whitelist()
+def acknowledge_duplicate_hit(lead_name: str):
+    require_lead_read(lead_name)
+
+    if not frappe.db.has_column(DT, "sr_dup_unseen_hit"):
+        return {"success": True}
+
+    values = {"sr_dup_unseen_hit": 0}
+    if frappe.db.has_column(DT, "sr_dup_unseen_hit_on"):
+        values["sr_dup_unseen_hit_on"] = None
+
+    frappe.db.set_value(DT, lead_name, values, update_modified=False)
+    return {"success": True}
 
 
 def _as_list(value):
@@ -106,3 +256,11 @@ def _as_list(value):
         return []
     return [item.get("name") if isinstance(item, dict) else item for item in value if item]
 
+
+def _count_fields():
+    fields = ["name", "mobile_no", "sr_mobile_norm"]
+    if frappe.db.has_column("CRM Lead", "sr_lead_pipeline"):
+        fields.append("sr_lead_pipeline")
+    if frappe.db.has_column("CRM Lead", "sr_dup_unseen_hit"):
+        fields.append("sr_dup_unseen_hit")
+    return fields
