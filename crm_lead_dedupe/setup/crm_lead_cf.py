@@ -2,6 +2,7 @@
 import time
 
 import frappe
+from crm_lead_dedupe.leads.perm import require_dedupe_manager
 
 from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_OF_FIELD,
@@ -150,7 +151,9 @@ def _is_done(key: str) -> bool:
     return _get_progress(key) == "1"
 
 
+@frappe.whitelist()
 def reset_backfill_progress():
+    require_dedupe_manager()
     for key in (
         "legacy_done",
         "normalize_done",
@@ -234,7 +237,9 @@ def backfill_mobile_norm():
         pass
 
 
+@frappe.whitelist()
 def clear_legacy_duplicate_links_batched(batch_size: int = 5000, reset: bool = False):
+    require_dedupe_manager()
     if not frappe.db.has_column(DT, LEGACY_DUPLICATE_OF_FIELD):
         _set_progress("legacy_done", "1")
         frappe.db.commit()
@@ -280,7 +285,9 @@ def clear_legacy_duplicate_links_batched(batch_size: int = 5000, reset: bool = F
     return {"processed": len(names), "done": done}
 
 
+@frappe.whitelist()
 def backfill_mobile_norm_batched(batch_size: int = 2000, reset: bool = False):
+    require_dedupe_manager()
     if not frappe.db.has_column(DT, "mobile_no") or not frappe.db.has_column(DT, "sr_mobile_norm"):
         _set_progress("normalize_done", "1")
         frappe.db.commit()
@@ -346,7 +353,9 @@ def backfill_mobile_norm_batched(batch_size: int = 2000, reset: bool = False):
     }
 
 
+@frappe.whitelist()
 def sync_duplicate_groups_batched(batch_size: int = 500, reset: bool = False):
+    require_dedupe_manager()
     if not frappe.db.has_column(DT, "sr_mobile_norm") or not frappe.db.has_column(DT, "sr_dup_hit_count"):
         _set_progress("groups_done", "1")
         frappe.db.commit()
@@ -401,11 +410,13 @@ def sync_duplicate_groups_batched(batch_size: int = 500, reset: bool = False):
     }
 
 
+@frappe.whitelist()
 def run_backfill_batch(
     legacy_batch_size: int = 5000,
     normalize_batch_size: int = 2000,
     group_batch_size: int = 500,
 ):
+    require_dedupe_manager()
     ensure_indexes()
 
     legacy = clear_legacy_duplicate_links_batched(batch_size=legacy_batch_size)
@@ -426,6 +437,7 @@ def run_backfill_batch(
     }
 
 
+@frappe.whitelist()
 def run_backfill_until_done(
     legacy_batch_size: int = 5000,
     normalize_batch_size: int = 5000,
@@ -433,6 +445,7 @@ def run_backfill_until_done(
     max_batches: int = 200,
     sleep_seconds: float = 1,
 ):
+    require_dedupe_manager()
     max_batches = max(1, int(max_batches or 200))
     sleep_seconds = max(0, float(sleep_seconds or 0))
 
