@@ -13,6 +13,7 @@ from crm_lead_dedupe.leads.dup_utils import (
 
 DT = "CRM Lead"
 PROGRESS_PREFIX = "crm_lead_dedupe_backfill"
+LOGGER_NAME = "crm_lead_dedupe_backfill"
 CUSTOM_FIELDS = [
     # Dedupe
     {"fieldname": "sr_dedupe_tab", "label": "Duplicates", "fieldtype": "Tab Break", "insert_after": "sr_w_team_id"},
@@ -151,6 +152,18 @@ def _is_done(key: str) -> bool:
     return _get_progress(key) == "1"
 
 
+def _as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _log_backfill(message: str, log_to_console: bool = True) -> None:
+    frappe.logger(LOGGER_NAME).info(message)
+    if _as_bool(log_to_console):
+        print(f"[{LOGGER_NAME}] {message}")
+
+
 @frappe.whitelist()
 def reset_backfill_progress():
     require_dedupe_manager()
@@ -238,18 +251,28 @@ def backfill_mobile_norm():
 
 
 @frappe.whitelist()
-def clear_legacy_duplicate_links_batched(batch_size: int = 5000, reset: bool = False):
+def clear_legacy_duplicate_links_batched(
+    batch_size: int = 5000,
+    reset: bool = False,
+    log_records: bool = False,
+    log_to_console: bool = True,
+):
     require_dedupe_manager()
+    log_records = _as_bool(log_records)
     if not frappe.db.has_column(DT, LEGACY_DUPLICATE_OF_FIELD):
         _set_progress("legacy_done", "1")
         frappe.db.commit()
-        return {"processed": 0, "done": True}
+        result = {"processed": 0, "done": True}
+        _log_backfill(f"legacy_links skipped: column_missing result={result}", log_to_console)
+        return result
 
     if reset:
         _set_progress("legacy_done", None)
 
     if _is_done("legacy_done"):
-        return {"processed": 0, "done": True}
+        result = {"processed": 0, "done": True}
+        _log_backfill(f"legacy_links skipped: already_done result={result}", log_to_console)
+        return result
 
     batch_size = max(1, int(batch_size or 5000))
     rows = frappe.db.sql(
@@ -267,7 +290,9 @@ def clear_legacy_duplicate_links_batched(batch_size: int = 5000, reset: bool = F
     if not rows:
         _set_progress("legacy_done", "1")
         frappe.db.commit()
-        return {"processed": 0, "done": True}
+        result = {"processed": 0, "done": True}
+        _log_backfill(f"legacy_links batch result={result}", log_to_console)
+        return result
 
     names = [row.name for row in rows]
     frappe.db.sql(
@@ -282,28 +307,42 @@ def clear_legacy_duplicate_links_batched(batch_size: int = 5000, reset: bool = F
     if done:
         _set_progress("legacy_done", "1")
     frappe.db.commit()
-    return {"processed": len(names), "done": done}
+    result = {"processed": len(names), "done": done}
+    _log_backfill(f"legacy_links batch result={result}", log_to_console)
+    if log_records:
+        _log_backfill(f"legacy_links cleared_names={names}", log_to_console)
+    return result
 
 
 @frappe.whitelist()
-def backfill_mobile_norm_batched(batch_size: int = 2000, reset: bool = False):
+def backfill_mobile_norm_batched(
+    batch_size: int = 2000,
+    reset: bool = False,
+    log_records: bool = False,
+    log_to_console: bool = True,
+):
     require_dedupe_manager()
+    log_records = _as_bool(log_records)
     if not frappe.db.has_column(DT, "mobile_no") or not frappe.db.has_column(DT, "sr_mobile_norm"):
         _set_progress("normalize_done", "1")
         frappe.db.commit()
-        return {"processed": 0, "updated": 0, "done": True}
+        result = {"processed": 0, "updated": 0, "done": True}
+        _log_backfill(f"normalize skipped: column_missing result={result}", log_to_console)
+        return result
 
     if reset:
         _set_progress("normalize_done", None)
         _set_progress("normalize_last_name", "")
 
     if _is_done("normalize_done"):
-        return {
+        result = {
             "processed": 0,
             "updated": 0,
             "last_name": _get_progress("normalize_last_name"),
             "done": True,
         }
+        _log_backfill(f"normalize skipped: already_done result={result}", log_to_console)
+        return result
 
     batch_size = max(1, int(batch_size or 2000))
     last_name = _get_progress("normalize_last_name")
@@ -323,7 +362,9 @@ def backfill_mobile_norm_batched(batch_size: int = 2000, reset: bool = False):
     if not rows:
         _set_progress("normalize_done", "1")
         frappe.db.commit()
-        return {"processed": 0, "updated": 0, "last_name": last_name, "done": True}
+        result = {"processed": 0, "updated": 0, "last_name": last_name, "done": True}
+        _log_backfill(f"normalize batch result={result}", log_to_console)
+        return result
 
     updates = {}
     for row in rows:
@@ -345,32 +386,46 @@ def backfill_mobile_norm_batched(batch_size: int = 2000, reset: bool = False):
         _set_progress("normalize_done", "1")
     frappe.db.commit()
 
-    return {
+    result = {
         "processed": len(rows),
         "updated": len(updates),
         "last_name": last_name,
         "done": done,
     }
+    _log_backfill(f"normalize batch result={result}", log_to_console)
+    if log_records:
+        _log_backfill(f"normalize updated_names={list(updates)}", log_to_console)
+    return result
 
 
 @frappe.whitelist()
-def sync_duplicate_groups_batched(batch_size: int = 500, reset: bool = False):
+def sync_duplicate_groups_batched(
+    batch_size: int = 500,
+    reset: bool = False,
+    log_records: bool = False,
+    log_to_console: bool = True,
+):
     require_dedupe_manager()
+    log_records = _as_bool(log_records)
     if not frappe.db.has_column(DT, "sr_mobile_norm") or not frappe.db.has_column(DT, "sr_dup_hit_count"):
         _set_progress("groups_done", "1")
         frappe.db.commit()
-        return {"processed": 0, "done": True}
+        result = {"processed": 0, "done": True}
+        _log_backfill(f"group_sync skipped: column_missing result={result}", log_to_console)
+        return result
 
     if reset:
         _set_progress("groups_done", None)
         _set_progress("groups_last_mobile_norm", "")
 
     if _is_done("groups_done"):
-        return {
+        result = {
             "processed": 0,
             "last_mobile_norm": _get_progress("groups_last_mobile_norm"),
             "done": True,
         }
+        _log_backfill(f"group_sync skipped: already_done result={result}", log_to_console)
+        return result
 
     batch_size = max(1, int(batch_size or 500))
     last_mobile_norm = _get_progress("groups_last_mobile_norm")
@@ -391,8 +446,11 @@ def sync_duplicate_groups_batched(batch_size: int = 500, reset: bool = False):
     if not rows:
         _set_progress("groups_done", "1")
         frappe.db.commit()
-        return {"processed": 0, "last_mobile_norm": last_mobile_norm, "done": True}
+        result = {"processed": 0, "last_mobile_norm": last_mobile_norm, "done": True}
+        _log_backfill(f"group_sync batch result={result}", log_to_console)
+        return result
 
+    mobile_norms = [row.sr_mobile_norm for row in rows]
     for row in rows:
         sync_duplicate_group(row.sr_mobile_norm)
 
@@ -403,11 +461,15 @@ def sync_duplicate_groups_batched(batch_size: int = 500, reset: bool = False):
         _set_progress("groups_done", "1")
     frappe.db.commit()
 
-    return {
+    result = {
         "processed": len(rows),
         "last_mobile_norm": last_mobile_norm,
         "done": done,
     }
+    _log_backfill(f"group_sync batch result={result}", log_to_console)
+    if log_records:
+        _log_backfill(f"group_sync mobile_norms={mobile_norms}", log_to_console)
+    return result
 
 
 @frappe.whitelist()
@@ -415,26 +477,43 @@ def run_backfill_batch(
     legacy_batch_size: int = 5000,
     normalize_batch_size: int = 2000,
     group_batch_size: int = 500,
+    log_records: bool = False,
+    log_to_console: bool = True,
 ):
     require_dedupe_manager()
+    log_records = _as_bool(log_records)
     ensure_indexes()
 
-    legacy = clear_legacy_duplicate_links_batched(batch_size=legacy_batch_size)
+    legacy = clear_legacy_duplicate_links_batched(
+        batch_size=legacy_batch_size,
+        log_records=log_records,
+        log_to_console=log_to_console,
+    )
     normalize = {"processed": 0, "updated": 0, "done": _is_done("normalize_done")}
     groups = {"processed": 0, "done": _is_done("groups_done")}
 
     if legacy.get("done"):
-        normalize = backfill_mobile_norm_batched(batch_size=normalize_batch_size)
+        normalize = backfill_mobile_norm_batched(
+            batch_size=normalize_batch_size,
+            log_records=log_records,
+            log_to_console=log_to_console,
+        )
 
     if legacy.get("done") and normalize.get("done"):
-        groups = sync_duplicate_groups_batched(batch_size=group_batch_size)
+        groups = sync_duplicate_groups_batched(
+            batch_size=group_batch_size,
+            log_records=log_records,
+            log_to_console=log_to_console,
+        )
 
-    return {
+    result = {
         "legacy": legacy,
         "normalize": normalize,
         "groups": groups,
         "done": bool(legacy.get("done") and normalize.get("done") and groups.get("done")),
     }
+    _log_backfill(f"backfill_batch result={result}", log_to_console)
+    return result
 
 
 @frappe.whitelist()
@@ -444,10 +523,21 @@ def run_backfill_until_done(
     group_batch_size: int = 500,
     max_batches: int = 200,
     sleep_seconds: float = 1,
+    log_records: bool = False,
+    log_to_console: bool = True,
 ):
     require_dedupe_manager()
     max_batches = max(1, int(max_batches or 200))
     sleep_seconds = max(0, float(sleep_seconds or 0))
+    log_records = _as_bool(log_records)
+
+    _log_backfill(
+        "backfill_until_done started "
+        f"legacy_batch_size={legacy_batch_size} normalize_batch_size={normalize_batch_size} "
+        f"group_batch_size={group_batch_size} max_batches={max_batches} "
+        f"sleep_seconds={sleep_seconds} log_records={log_records}",
+        log_to_console,
+    )
 
     summary = {
         "batches": 0,
@@ -464,6 +554,8 @@ def run_backfill_until_done(
             legacy_batch_size=legacy_batch_size,
             normalize_batch_size=normalize_batch_size,
             group_batch_size=group_batch_size,
+            log_records=log_records,
+            log_to_console=log_to_console,
         )
 
         summary["batches"] = batch_no + 1
@@ -473,6 +565,10 @@ def run_backfill_until_done(
         summary["normalized_updated"] += int(result.get("normalize", {}).get("updated") or 0)
         summary["groups_processed"] += int(result.get("groups", {}).get("processed") or 0)
         summary["done"] = bool(result.get("done"))
+        _log_backfill(
+            f"backfill_until_done batch={batch_no + 1}/{max_batches} summary={summary}",
+            log_to_console,
+        )
 
         if summary["done"]:
             break
@@ -480,6 +576,7 @@ def run_backfill_until_done(
         if sleep_seconds and batch_no + 1 < max_batches:
             time.sleep(sleep_seconds)
 
+    _log_backfill(f"backfill_until_done finished summary={summary}", log_to_console)
     return summary
 
 
