@@ -8,6 +8,7 @@ from .crm_lead_cf import (
     ensure_indexes,
     reset_backfill_progress,
     run_backfill_batch,
+    run_backfill_until_done,
     sync_duplicate_groups_batched,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "ensure_indexes",
     "reset_backfill_progress",
     "run_backfill_batch",
+    "run_backfill_until_done",
     "sync_duplicate_groups_batched",
 ]
