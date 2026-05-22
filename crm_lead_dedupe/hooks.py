@@ -5,7 +5,7 @@ app_description = "Duplicate detection + merge for Lead"
 app_email = "webdevelopersriaas@gmail.com"
 app_license = "mit"
 
-required_apps = ["crm", "sriaas_clinic"]
+required_apps = ["crm"]
 
 # Installation
 # before_install = "crm_lead_dedupe.install.before_install"
