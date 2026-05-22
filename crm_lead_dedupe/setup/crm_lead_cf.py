@@ -1,4 +1,6 @@
 # apps/crm_lead_dedupe/crm_lead_dedupe/setup/crm_lead_cf.py
+import time
+
 import frappe
 
 from crm_lead_dedupe.leads.dup_utils import (
@@ -422,6 +424,50 @@ def run_backfill_batch(
         "groups": groups,
         "done": bool(legacy.get("done") and normalize.get("done") and groups.get("done")),
     }
+
+
+def run_backfill_until_done(
+    legacy_batch_size: int = 5000,
+    normalize_batch_size: int = 5000,
+    group_batch_size: int = 500,
+    max_batches: int = 200,
+    sleep_seconds: float = 1,
+):
+    max_batches = max(1, int(max_batches or 200))
+    sleep_seconds = max(0, float(sleep_seconds or 0))
+
+    summary = {
+        "batches": 0,
+        "legacy_processed": 0,
+        "normalized_processed": 0,
+        "normalized_updated": 0,
+        "groups_processed": 0,
+        "done": False,
+        "last_result": None,
+    }
+
+    for batch_no in range(max_batches):
+        result = run_backfill_batch(
+            legacy_batch_size=legacy_batch_size,
+            normalize_batch_size=normalize_batch_size,
+            group_batch_size=group_batch_size,
+        )
+
+        summary["batches"] = batch_no + 1
+        summary["last_result"] = result
+        summary["legacy_processed"] += int(result.get("legacy", {}).get("processed") or 0)
+        summary["normalized_processed"] += int(result.get("normalize", {}).get("processed") or 0)
+        summary["normalized_updated"] += int(result.get("normalize", {}).get("updated") or 0)
+        summary["groups_processed"] += int(result.get("groups", {}).get("processed") or 0)
+        summary["done"] = bool(result.get("done"))
+
+        if summary["done"]:
+            break
+
+        if sleep_seconds and batch_no + 1 < max_batches:
+            time.sleep(sleep_seconds)
+
+    return summary
 
 
 def clear_legacy_duplicate_links():
