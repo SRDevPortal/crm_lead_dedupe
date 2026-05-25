@@ -56,4 +56,27 @@ def archive_group_for_doc(doc, method=None):
         log_operation("archive_group_for_doc.skipped", lead_name=doc.name, method=method, reason="hooks_disabled")
         return
     mobile_norm = getattr(doc, "sr_mobile_norm", None) or norm_mobile(getattr(doc, "mobile_no", ""))
-    log_operation("archive_group_for_doc.queued", lead_name=doc.name, method=method, mobile_norm=mobile_norm)
+    mark_unseen = bool(getattr(doc.flags, "crm_lead_dedupe_mark_unseen_hit", False))
+
+    if not mark_unseen or not mobile_norm:
+        log_operation(
+            "archive_group_for_doc.queued",
+            lead_name=doc.name,
+            method=method,
+            mobile_norm=mobile_norm,
+            mark_unseen=mark_unseen,
+        )
+        return
+
+    sync_duplicate_group(
+        mobile_norm,
+        doc.get("sr_lead_pipeline") if frappe.db.has_column("CRM Lead", "sr_lead_pipeline") else None,
+        mark_unseen_for_primary=True,
+    )
+    log_operation(
+        "archive_group_for_doc.synced",
+        lead_name=doc.name,
+        method=method,
+        mobile_norm=mobile_norm,
+        mark_unseen=mark_unseen,
+    )
