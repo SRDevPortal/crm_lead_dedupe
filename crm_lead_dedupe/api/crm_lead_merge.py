@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 from frappe.model.rename_doc import rename_doc
+from crm_lead_dedupe.logging import log_operation
 from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
@@ -63,6 +64,7 @@ def merge_crm_leads(primary: str, duplicates):
     require_dedupe_manager()
 
     duplicates = _as_list(duplicates)
+    log_operation("merge_crm_leads.start", primary=primary, duplicate_count=len(duplicates), duplicates=duplicates)
     if not duplicates:
         frappe.throw("No duplicates provided.")
 
@@ -81,6 +83,7 @@ def merge_crm_leads(primary: str, duplicates):
     if not allowed_duplicates:
         frappe.throw("No valid duplicates provided.")
 
+    log_operation("merge_crm_leads.validated", primary=primary, allowed_count=len(allowed_duplicates), allowed_duplicates=allowed_duplicates)
     relink_crm_lead_conversations(primary, allowed_duplicates)
 
     # merge each duplicate into primary
@@ -100,4 +103,5 @@ def merge_crm_leads(primary: str, duplicates):
     sync_duplicate_group(primary_row.sr_mobile_norm, primary_row.get("sr_lead_pipeline"))
 
     frappe.db.commit()
+    log_operation("merge_crm_leads.done", primary=primary, merged_count=len(allowed_duplicates), merged=allowed_duplicates)
     return {"status": "ok", "primary": primary, "merged": allowed_duplicates}
