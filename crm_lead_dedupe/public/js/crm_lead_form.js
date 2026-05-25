@@ -1,6 +1,10 @@
 // apps/crm_lead_dedupe/crm_lead_dedupe/public/js/crm_lead_form.js
 frappe.ui.form.on('CRM Lead', {
   async before_save(frm) {
+    if (!crmLeadDedupeEnabled('hooks_enabled')) {
+      return;
+    }
+
     // Proactively clear a stale "Duplicate Of" so server link validation can't fail
     if (frm.doc.sr_duplicate_of_name || frm.doc.sr_duplicate_of) {
       try {
@@ -15,12 +19,16 @@ frappe.ui.form.on('CRM Lead', {
   },
 
   after_save(frm) {
-    if (window.cur_list && window.cur_list.doctype === 'CRM Lead') {
+    if (crmLeadDedupeEnabled('ui_enabled') && window.cur_list && window.cur_list.doctype === 'CRM Lead') {
       window.cur_list.refresh();
     }
   },
 
   refresh(frm) {
+    if (!crmLeadDedupeEnabled('ui_enabled')) {
+      return;
+    }
+
     const archived = cint(frm.doc.sr_is_archived);
 
     if (archived) {
@@ -77,3 +85,7 @@ frappe.ui.form.on('CRM Lead', {
   }
 });
 
+function crmLeadDedupeEnabled(feature) {
+  const settings = (frappe.boot && frappe.boot.crm_lead_dedupe) || {};
+  return settings.enabled !== false && settings[feature] !== false;
+}
