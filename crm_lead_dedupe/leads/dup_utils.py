@@ -2,6 +2,7 @@ import re
 import frappe
 from frappe.utils import cint, now_datetime
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.settings import is_enabled
 
 
 DT = "CRM Lead"
@@ -214,6 +215,8 @@ def sync_duplicate_group(
         pipeline=pipeline,
         mark_unseen_for_primary=mark_unseen_for_primary,
     )
+    archive_enabled = is_enabled("archive")
+    hit_count_enabled = is_enabled("hit_count")
     rows = frappe.get_all(
         DT,
         filters=duplicate_filters(mobile_norm, pipeline),
@@ -238,21 +241,22 @@ def sync_duplicate_group(
             r for r in rows
             if r["name"] != row["name"] and is_duplicate_match(row, r)
         ]
-        values = {
-            "sr_dup_hit_count": len(candidates),
-            "sr_dup_candidates_json": _candidate_json(candidates),
-        }
+        values = {}
+        if hit_count_enabled:
+            values.update({
+                "sr_dup_hit_count": len(candidates),
+                "sr_dup_candidates_json": _candidate_json(candidates),
+            })
 
         if row["name"] == primary_name:
-            values.update(
-                {
-                    "sr_is_archived": 0 if primary_is_active else cint(row.get("sr_is_archived")),
-                    "sr_is_duplicate": 0,
-                    **_duplicate_link_values(),
-                    "sr_duplicate_score": 0,
-                }
-            )
-            if has_unseen_flag:
+            values.update({
+                "sr_is_duplicate": 0,
+                **_duplicate_link_values(),
+                "sr_duplicate_score": 0,
+            })
+            if archive_enabled:
+                values["sr_is_archived"] = 0 if primary_is_active else cint(row.get("sr_is_archived"))
+            if hit_count_enabled and has_unseen_flag:
                 if not candidates:
                     values["sr_dup_unseen_hit"] = 0
                     if has_unseen_on:
@@ -266,15 +270,14 @@ def sync_duplicate_group(
             matched = score >= DUPLICATE_THRESHOLD
             if matched:
                 relink_to_primary.append(row["name"])
-            values.update(
-                {
-                    "sr_is_archived": 1 if matched else 0,
-                    "sr_is_duplicate": 1 if matched else 0,
-                    **_duplicate_link_values(primary_name if matched else None),
-                    "sr_duplicate_score": score,
-                }
-            )
-            if has_unseen_flag:
+            values.update({
+                "sr_is_duplicate": 1 if matched else 0,
+                **_duplicate_link_values(primary_name if matched else None),
+                "sr_duplicate_score": score,
+            })
+            if archive_enabled:
+                values["sr_is_archived"] = 1 if matched else 0
+            if hit_count_enabled and has_unseen_flag:
                 values["sr_dup_unseen_hit"] = 0
                 if has_unseen_on:
                     values["sr_dup_unseen_hit_on"] = None
@@ -289,6 +292,8 @@ def sync_duplicate_group(
         row_count=len(rows),
         primary=primary_name,
         relink_count=len(relink_to_primary),
+        archive_enabled=archive_enabled,
+        hit_count_enabled=hit_count_enabled,
     )
     if relink_to_primary:
         try:
@@ -315,6 +320,10 @@ def recompute_hit_counts(mobile_norm: str):
     """
     Recalculate sr_dup_hit_count for *every* lead in the mobile group.
     """
+    if not is_enabled("hit_count"):
+        log_operation("recompute_hit_counts.skipped", mobile_norm=mobile_norm, reason="hit_count_disabled")
+        return
+
     if not mobile_norm:
         return
 
