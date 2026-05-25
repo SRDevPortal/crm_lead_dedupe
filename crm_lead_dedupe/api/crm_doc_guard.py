@@ -1,5 +1,6 @@
 import frappe
 from crm.api.doc import get_data as crm_get_data
+from crm_lead_dedupe.settings import is_enabled
 
 
 ACTIVE_FILTERS = {"sr_is_archived": 0, "converted": 0}
@@ -17,7 +18,7 @@ def _as_filter_dict(value):
 
 
 def force_active_crm_lead_filters(doctype, filters=None, default_filters=None):
-    if doctype != "CRM Lead":
+    if doctype != "CRM Lead" or not is_enabled("permission_filter"):
         return filters, default_filters
 
     filters = _as_filter_dict(filters)
