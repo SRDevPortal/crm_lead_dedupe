@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 from frappe.model.rename_doc import rename_doc
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
@@ -62,6 +63,9 @@ def _validate_duplicate(primary_row, duplicate_row):
 @frappe.whitelist()
 def merge_crm_leads(primary: str, duplicates):
     require_dedupe_manager()
+    if not is_enabled("merge"):
+        log_operation("merge_crm_leads.skipped", primary=primary, reason="merge_disabled")
+        frappe.throw(_("CRM Lead Dedupe merge is disabled for this site."))
 
     duplicates = _as_list(duplicates)
     log_operation("merge_crm_leads.start", primary=primary, duplicate_count=len(duplicates), duplicates=duplicates)
