@@ -17,6 +17,7 @@ SETTING_DEFAULTS = {
     "crm_lead_dedupe_max_mobile_groups": 500,
     "crm_lead_dedupe_max_merges_per_run": 100,
     "crm_lead_dedupe_max_group_size": 100,
+    "crm_lead_dedupe_scheduler_interval_minutes": 5,
     "crm_lead_dedupe_blocked_mobiles": "\n".join(
         [
             "0000000000",
@@ -133,6 +134,7 @@ def as_boot_dict():
         "hit_count_enabled": is_enabled("hit_count"),
         "permission_filter_enabled": is_enabled("permission_filter"),
         "console_log": get_setting("crm_lead_dedupe_console_log"),
+        "scheduler_interval_minutes": get_setting("crm_lead_dedupe_scheduler_interval_minutes"),
     }
 
 

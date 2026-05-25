@@ -20,6 +20,7 @@
     "crm_lead_dedupe_max_mobile_groups",
     "crm_lead_dedupe_max_merges_per_run",
     "crm_lead_dedupe_max_group_size",
+    "crm_lead_dedupe_scheduler_interval_minutes",
     "crm_lead_dedupe_blocked_mobiles"
   ],
   "fields": [
@@ -77,7 +78,7 @@
     },
     {
       "default": "1",
-      "description": "Run the incremental auto-merge scheduler every 5 minutes.",
+      "description": "Run the incremental auto-merge scheduler at the configured interval.",
       "fieldname": "crm_lead_dedupe_scheduler_enabled",
       "fieldtype": "Check",
       "label": "Enable Scheduler"
@@ -128,6 +129,13 @@
       "fieldname": "crm_lead_dedupe_max_group_size",
       "fieldtype": "Int",
       "label": "Max Group Size"
+    },
+    {
+      "default": "5",
+      "description": "Minimum minutes between auto-merge scheduler runs.",
+      "fieldname": "crm_lead_dedupe_scheduler_interval_minutes",
+      "fieldtype": "Int",
+      "label": "Scheduler Interval Minutes"
     },
     {
       "default": "0000000000\n1111111111\n2222222222\n3333333333\n4444444444\n5555555555\n6666666666\n7777777777\n8888888888\n9999999999\n1234567890",

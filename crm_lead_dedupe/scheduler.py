@@ -1,6 +1,6 @@
 import frappe
 from frappe.model.rename_doc import rename_doc
-from frappe.utils import cint, now_datetime
+from frappe.utils import cint, get_datetime, now_datetime
 from frappe.utils.file_lock import LockTimeoutError
 from frappe.utils.synchronization import filelock
 
@@ -23,6 +23,7 @@ AUTO_MERGE_LOG_DOCTYPE = "CRM Lead Auto Merge Log"
 GLOBAL_LOCK = "crm_lead_dedupe_scheduler"
 MOBILE_LOCK_PREFIX = "crm_lead_dedupe_mobile_"
 HISTORICAL_PROGRESS_KEY = "crm_lead_dedupe_historical_last_mobile_norm"
+SCHEDULER_LAST_RUN_KEY = "crm_lead_dedupe_scheduler_last_run"
 
 
 def _setting_int(key: str, default: int, minimum: int = 1) -> int:
@@ -309,3 +310,26 @@ def run_auto_merge_scheduler():
     except LockTimeoutError:
         log_operation("auto_merge_scheduler.skipped", reason="already_running")
         return {"processed_groups": 0, "merged": 0, "skipped": "already_running"}
+
+
+def run_auto_merge_scheduler_if_due():
+    interval_minutes = _setting_int("crm_lead_dedupe_scheduler_interval_minutes", 5)
+    now = now_datetime()
+    last_run = frappe.defaults.get_global_default(SCHEDULER_LAST_RUN_KEY)
+
+    if last_run:
+        try:
+            elapsed_seconds = (now - get_datetime(last_run)).total_seconds()
+            if elapsed_seconds < interval_minutes * 60:
+                log_operation(
+                    "auto_merge_scheduler.skipped",
+                    reason="interval_not_due",
+                    interval_minutes=interval_minutes,
+                )
+                return {"processed_groups": 0, "merged": 0, "skipped": "interval_not_due"}
+        except Exception:
+            pass
+
+    frappe.defaults.set_global_default(SCHEDULER_LAST_RUN_KEY, now)
+    frappe.db.commit()
+    return run_auto_merge_scheduler()

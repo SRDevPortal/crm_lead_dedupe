@@ -139,8 +139,8 @@
       };
     }
 
-    // 5) Decorate rows from fields already loaded with the list data.
-    function decorateRows() {
+    // 5) Decorate rows from live hit counts, falling back to fields already loaded with list data.
+    async function decorateRows() {
       if (!crmLeadDedupeEnabled('ui_enabled', 'hit_count_enabled')) {
         listview.$result.find('.sr-hit-btn').remove();
         listview.$result.find('.sr-dup-flash').removeClass('sr-dup-flash');
@@ -150,13 +150,10 @@
       const rows = listview.data || [];
       if (!rows.length) return;
 
-      rows.forEach((doc) => {
-        const escapedName = window.CSS && CSS.escape
-          ? CSS.escape(doc.name)
-          : String(doc.name).replace(/"/g, '\\"');
+      const hitCounts = await fetchHitCounts(rows.map(row => row.name));
 
-        const $named = listview.$result.find(`[data-name="${escapedName}"]`);
-        const $row = $named.hasClass('list-row') ? $named : $named.closest('.list-row');
+      rows.forEach((doc) => {
+        const $row = getListRow(doc.name);
         if (!$row.length) return;
 
         const $subject = $row.find('.list-row-col.list-subject, .list-subject').first();
@@ -164,8 +161,9 @@
 
         $subject.find('.sr-hit-btn').remove();
 
-        const hits = cint(doc.sr_dup_hit_count || 0);
-        const unseenHit = cint(doc.sr_dup_unseen_hit || 0);
+        const freshCount = hitCounts[doc.name] || {};
+        const hits = cint(freshCount.hit_count ?? doc.sr_dup_hit_count ?? 0);
+        const unseenHit = cint(freshCount.unseen_hit ?? doc.sr_dup_unseen_hit ?? 0);
         $row.toggleClass('sr-dup-flash', Boolean(unseenHit));
         if (!hits) return;
 
@@ -195,6 +193,37 @@
     function scheduleHitDecorate() {
       clearTimeout(listview.crm_lead_dedupe_hit_timer);
       listview.crm_lead_dedupe_hit_timer = setTimeout(decorateRows, 100);
+    }
+
+    function getListRow(name) {
+      const escapedName = window.CSS && CSS.escape
+        ? CSS.escape(name)
+        : String(name).replace(/"/g, '\\"');
+      const $named = listview.$result.find(`[data-name="${escapedName}"]`);
+
+      let $row = $named.filter('.list-row').first();
+      if ($row.length) return $row;
+
+      $row = $named.find('.list-row').first();
+      if ($row.length) return $row;
+
+      return $named.closest('.list-row').first();
+    }
+
+    async function fetchHitCounts(names) {
+      const uniqueNames = Array.from(new Set((names || []).filter(Boolean)));
+      if (!uniqueNames.length) return {};
+
+      try {
+        const response = await frappe.call({
+          method: 'crm_lead_dedupe.api.crm_lead_duplicates.get_hit_counts_for_crm_leads',
+          args: { lead_names: uniqueNames },
+        });
+        return (response.message && response.message.result) || {};
+      } catch (error) {
+        console.warn('CRM Lead Dedupe hit count refresh failed', error);
+        return {};
+      }
     }
 
     listview.crm_lead_dedupe_decorate = scheduleHitDecorate;
