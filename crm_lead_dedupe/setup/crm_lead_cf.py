@@ -23,6 +23,7 @@ CUSTOM_FIELDS = [
         "label": "Mobile (Normalized)",
         "fieldtype": "Data",
         "insert_after": "sr_dedupe_sec",
+        "search_index": 1,
         "hidden": 1,
         "read_only": 1,
     },
@@ -39,7 +40,7 @@ CUSTOM_FIELDS = [
         "label": "Duplicate Score",
         "fieldtype": "Float",
         "insert_after": DUPLICATE_OF_FIELD,
-        "default": 0,
+        "default": "0",
         "hidden": 1,
         "read_only": 1,
     },
@@ -49,7 +50,7 @@ CUSTOM_FIELDS = [
         "fieldtype": "Check",
         "insert_after": "sr_duplicate_score",
         "hidden": 1,
-        "default": 0,
+        "default": "0",
         "read_only": 1,
     },
     {
@@ -65,7 +66,7 @@ CUSTOM_FIELDS = [
         "label": "Dup Hit Count",
         "fieldtype": "Int",
         "insert_after": "sr_dup_candidates_json",
-        "default": 0,
+        "default": "0",
         "hidden": 1,
         "read_only": 1,
     },
@@ -74,7 +75,7 @@ CUSTOM_FIELDS = [
         "label": "Unseen Duplicate Hit",
         "fieldtype": "Check",
         "insert_after": "sr_dup_hit_count",
-        "default": 0,
+        "default": "0",
         "hidden": 1,
         "read_only": 1,
     },
@@ -183,10 +184,11 @@ def ensure_indexes():
     if not frappe.db.has_column(DT, "sr_mobile_norm"):
         return
 
-    try:
-        frappe.db.add_index(DT, ["sr_mobile_norm"], index_name="idx_crmlead_mobile_norm")
-    except Exception:
-        pass
+    if not frappe.db.get_column_index(f"tab{DT}", "sr_mobile_norm", unique=False):
+        try:
+            frappe.db.add_index(DT, ["sr_mobile_norm"], index_name="idx_crmlead_mobile_norm")
+        except Exception:
+            pass
 
     if frappe.db.has_column(DT, "sr_lead_pipeline"):
         try:
