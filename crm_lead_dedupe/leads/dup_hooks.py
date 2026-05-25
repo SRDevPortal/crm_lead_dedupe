@@ -1,4 +1,5 @@
 import frappe
+from crm_lead_dedupe.logging import log_operation
 from .dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
@@ -100,12 +101,14 @@ def on_before_validate(doc, method=None):
     """Normalize mobile early for controller and hook logic."""
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
     _clear_dup_link(doc)
+    log_operation("lead_before_validate", lead_name=doc.name, is_new=doc.is_new(), mobile_norm=doc.sr_mobile_norm)
 
 
 def on_validate(doc, method=None):
     """Runs before save; ensures stale links won't fail framework validation."""
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
     _clear_dup_link(doc)
+    log_operation("lead_validate", lead_name=doc.name, is_new=doc.is_new(), mobile_norm=doc.sr_mobile_norm)
 
 
 def on_before_save(doc, method=None):
@@ -158,3 +161,15 @@ def on_before_save(doc, method=None):
             doc.sr_dup_candidates_json = frappe.as_json(duplicate_cands[:5])
         except Exception:
             pass
+    log_operation(
+        "lead_before_save",
+        lead_name=doc.name,
+        is_new=doc.is_new(),
+        mobile_norm=doc.sr_mobile_norm,
+        candidate_count=len(cands),
+        duplicate_count=len(duplicate_cands),
+        best_duplicate=best.get("name") if best else None,
+        best_score=best_score,
+        is_duplicate=doc.sr_is_duplicate,
+        duplicate_of=_get_duplicate_of(doc),
+    )
