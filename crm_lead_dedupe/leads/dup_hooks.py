@@ -1,5 +1,6 @@
 import frappe
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.settings import is_enabled
 from .dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
@@ -99,6 +100,9 @@ def _clear_dup_link(doc):
 
 def on_before_validate(doc, method=None):
     """Normalize mobile early for controller and hook logic."""
+    if not is_enabled("hooks"):
+        log_operation("lead_before_validate.skipped", lead_name=doc.name, reason="hooks_disabled")
+        return
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
     _clear_dup_link(doc)
     log_operation("lead_before_validate", lead_name=doc.name, is_new=doc.is_new(), mobile_norm=doc.sr_mobile_norm)
@@ -106,6 +110,9 @@ def on_before_validate(doc, method=None):
 
 def on_validate(doc, method=None):
     """Runs before save; ensures stale links won't fail framework validation."""
+    if not is_enabled("hooks"):
+        log_operation("lead_validate.skipped", lead_name=doc.name, reason="hooks_disabled")
+        return
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
     _clear_dup_link(doc)
     log_operation("lead_validate", lead_name=doc.name, is_new=doc.is_new(), mobile_norm=doc.sr_mobile_norm)
@@ -119,6 +126,10 @@ def on_before_save(doc, method=None):
     - Maintain JSON summary for quick debug
     - Store old group key so post-save sync can repair both old and new groups
     """
+    if not is_enabled("hooks"):
+        log_operation("lead_before_save.skipped", lead_name=doc.name, reason="hooks_disabled")
+        return
+
     # Normalize mobile
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
     old_key = _store_old_group_key(doc)
