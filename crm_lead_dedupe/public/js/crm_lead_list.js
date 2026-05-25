@@ -4,7 +4,9 @@
   const existingSettings = frappe.listview_settings[doctype] || {};
   const existingOnload = existingSettings.onload;
   const existingRefresh = existingSettings.refresh;
-  const dedupeFields = ['sr_dup_hit_count', 'sr_dup_unseen_hit', 'lead_name'];
+  const dedupeFields = crmLeadDedupeEnabled('ui_enabled')
+    ? ['sr_dup_hit_count', 'sr_dup_unseen_hit', 'lead_name']
+    : [];
 
   frappe.listview_settings[doctype] = {
     ...existingSettings,
@@ -14,6 +16,9 @@
       if (typeof existingOnload === 'function') {
         existingOnload(listview);
       }
+      if (!crmLeadDedupeEnabled('ui_enabled')) {
+        return;
+      }
       installCRMLeadDedupeList(listview);
     },
 
@@ -21,7 +26,7 @@
       if (typeof existingRefresh === 'function') {
         existingRefresh(listview);
       }
-      if (listview.crm_lead_dedupe_decorate) {
+      if (crmLeadDedupeEnabled('ui_enabled') && listview.crm_lead_dedupe_decorate) {
         listview.crm_lead_dedupe_decorate();
       }
     },
@@ -190,6 +195,11 @@
     }
   }
 })();
+
+function crmLeadDedupeEnabled(feature) {
+  const settings = (frappe.boot && frappe.boot.crm_lead_dedupe) || {};
+  return settings.enabled !== false && settings[feature] !== false;
+}
 
 function removeArchivedFilterFromRoute(listview) {
   stripArchivedQueryParam();
