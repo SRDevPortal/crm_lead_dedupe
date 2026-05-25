@@ -18,6 +18,19 @@ GROUP_STATE_FIELDS = (
     "sr_dup_unseen_hit",
     "sr_dup_unseen_hit_on",
 )
+DEFAULT_BLOCKED_MOBILES = {
+    "0000000000",
+    "1111111111",
+    "2222222222",
+    "3333333333",
+    "4444444444",
+    "5555555555",
+    "6666666666",
+    "7777777777",
+    "8888888888",
+    "9999999999",
+    "1234567890",
+}
 
 
 def norm_mobile(raw: str | None) -> str:
@@ -26,6 +39,19 @@ def norm_mobile(raw: str | None) -> str:
         return ""
     digits = re.sub(r"\D", "", raw)
     return digits[-10:] if len(digits) >= 10 else digits
+
+
+def is_valid_auto_merge_mobile(mobile_norm: str | None, blocked_mobiles=None) -> bool:
+    """Only exact 10-digit, non-dummy mobile keys are safe for automatic merge."""
+    mobile_norm = (mobile_norm or "").strip()
+    blocked = set(blocked_mobiles or DEFAULT_BLOCKED_MOBILES)
+    if len(mobile_norm) != 10 or not mobile_norm.isdigit():
+        return False
+    if mobile_norm in blocked:
+        return False
+    if len(set(mobile_norm)) == 1:
+        return False
+    return True
 
 
 def _has_column(fieldname: str) -> bool:

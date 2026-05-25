@@ -9,9 +9,29 @@ SETTING_DEFAULTS = {
     "crm_lead_dedupe_hooks_enabled": 1,
     "crm_lead_dedupe_archive_enabled": 1,
     "crm_lead_dedupe_merge_enabled": 1,
+    "crm_lead_dedupe_scheduler_enabled": 1,
     "crm_lead_dedupe_hit_count_enabled": 1,
     "crm_lead_dedupe_permission_filter_enabled": 1,
     "crm_lead_dedupe_console_log": 1,
+    "crm_lead_dedupe_max_pending_leads": 2000,
+    "crm_lead_dedupe_max_mobile_groups": 500,
+    "crm_lead_dedupe_max_merges_per_run": 100,
+    "crm_lead_dedupe_max_group_size": 100,
+    "crm_lead_dedupe_blocked_mobiles": "\n".join(
+        [
+            "0000000000",
+            "1111111111",
+            "2222222222",
+            "3333333333",
+            "4444444444",
+            "5555555555",
+            "6666666666",
+            "7777777777",
+            "8888888888",
+            "9999999999",
+            "1234567890",
+        ]
+    ),
 }
 
 FEATURE_KEYS = {
@@ -19,6 +39,7 @@ FEATURE_KEYS = {
     "hooks": "crm_lead_dedupe_hooks_enabled",
     "archive": "crm_lead_dedupe_archive_enabled",
     "merge": "crm_lead_dedupe_merge_enabled",
+    "scheduler": "crm_lead_dedupe_scheduler_enabled",
     "hit_count": "crm_lead_dedupe_hit_count_enabled",
     "permission_filter": "crm_lead_dedupe_permission_filter_enabled",
     "console_log": "crm_lead_dedupe_console_log",
@@ -74,15 +95,20 @@ def ensure_settings_defaults():
 
 
 def get_setting(key):
-    default = bool(SETTING_DEFAULTS.get(key, 1))
+    default = SETTING_DEFAULTS.get(key, 1)
 
     # Explicit site_config values are emergency overrides and win over the UI.
     if _site_config_has(key):
-        return _as_bool(frappe.conf.get(key), default)
+        value = frappe.conf.get(key)
+        if isinstance(default, bool) or key in FEATURE_KEYS.values() or key.endswith("_enabled") or key.endswith("_log"):
+            return _as_bool(value, bool(default))
+        return value
 
     ui_value = _ui_setting(key)
     if ui_value is not None:
-        return _as_bool(ui_value, default)
+        if isinstance(default, bool) or key in FEATURE_KEYS.values() or key.endswith("_enabled") or key.endswith("_log"):
+            return _as_bool(ui_value, bool(default))
+        return ui_value
 
     return default
 
@@ -103,6 +129,7 @@ def as_boot_dict():
         "hooks_enabled": is_enabled("hooks"),
         "archive_enabled": is_enabled("archive"),
         "merge_enabled": is_enabled("merge"),
+        "scheduler_enabled": is_enabled("scheduler"),
         "hit_count_enabled": is_enabled("hit_count"),
         "permission_filter_enabled": is_enabled("permission_filter"),
         "console_log": get_setting("crm_lead_dedupe_console_log"),

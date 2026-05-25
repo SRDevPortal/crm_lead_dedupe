@@ -98,6 +98,47 @@ CUSTOM_FIELDS = [
         "in_standard_filter": 0,
         "read_only": 1,
     },
+    {
+        "fieldname": "sr_dedupe_pending",
+        "label": "Dedupe Pending",
+        "fieldtype": "Check",
+        "default": "0",
+        "insert_after": "sr_is_archived",
+        "hidden": 1,
+        "read_only": 1,
+    },
+    {
+        "fieldname": "sr_dedupe_status",
+        "label": "Dedupe Status",
+        "fieldtype": "Data",
+        "insert_after": "sr_dedupe_pending",
+        "hidden": 1,
+        "read_only": 1,
+    },
+    {
+        "fieldname": "sr_dedupe_checked_on",
+        "label": "Dedupe Checked On",
+        "fieldtype": "Datetime",
+        "insert_after": "sr_dedupe_status",
+        "hidden": 1,
+        "read_only": 1,
+    },
+    {
+        "fieldname": "sr_dedupe_error",
+        "label": "Dedupe Error",
+        "fieldtype": "Small Text",
+        "insert_after": "sr_dedupe_checked_on",
+        "hidden": 1,
+        "read_only": 1,
+    },
+    {
+        "fieldname": "sr_merged_into",
+        "label": "Merged Into",
+        "fieldtype": "Data",
+        "insert_after": "sr_dedupe_error",
+        "hidden": 1,
+        "read_only": 1,
+    },
 ]
 
 
@@ -200,6 +241,42 @@ def ensure_indexes():
             )
         except Exception:
             pass
+
+    for fields, index_name in (
+        (["sr_mobile_norm", "creation"], "idx_crmlead_mobile_creation"),
+        (["sr_mobile_norm", "sr_is_archived", "converted", "creation"], "idx_crmlead_mobile_active_creation"),
+        (["sr_dedupe_pending", "modified"], "idx_crmlead_dedupe_pending_mod"),
+        (["sr_is_archived", "converted", "modified"], "idx_crmlead_active_modified"),
+    ):
+        if all(frappe.db.has_column(DT, fieldname) for fieldname in fields):
+            try:
+                frappe.db.add_index(DT, fields, index_name=index_name)
+            except Exception:
+                pass
+
+    ensure_related_indexes()
+
+
+def ensure_related_indexes():
+    related_indexes = {
+        "Chat Conversation": (
+            (["linked_crm_lead"], "idx_chat_conversation_crm_lead"),
+            (["linked_reference_doctype", "linked_reference_name"], "idx_chat_conversation_ref"),
+        ),
+        "Chat Contact": (
+            (["source_doctype", "source_name"], "idx_chat_contact_source"),
+        ),
+    }
+
+    for doctype, indexes in related_indexes.items():
+        if not frappe.db.exists("DocType", doctype):
+            continue
+        for fields, index_name in indexes:
+            if all(frappe.db.has_column(doctype, fieldname) for fieldname in fields):
+                try:
+                    frappe.db.add_index(doctype, fields, index_name=index_name)
+                except Exception:
+                    pass
 
 
 def backfill_mobile_norm():

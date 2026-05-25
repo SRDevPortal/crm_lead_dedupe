@@ -12,8 +12,15 @@
     "crm_lead_dedupe_hooks_enabled",
     "crm_lead_dedupe_archive_enabled",
     "crm_lead_dedupe_merge_enabled",
+    "crm_lead_dedupe_scheduler_enabled",
     "crm_lead_dedupe_hit_count_enabled",
-    "crm_lead_dedupe_permission_filter_enabled"
+    "crm_lead_dedupe_permission_filter_enabled",
+    "section_scheduler",
+    "crm_lead_dedupe_max_pending_leads",
+    "crm_lead_dedupe_max_mobile_groups",
+    "crm_lead_dedupe_max_merges_per_run",
+    "crm_lead_dedupe_max_group_size",
+    "crm_lead_dedupe_blocked_mobiles"
   ],
   "fields": [
     {
@@ -70,6 +77,13 @@
     },
     {
       "default": "1",
+      "description": "Run the incremental auto-merge scheduler every 5 minutes.",
+      "fieldname": "crm_lead_dedupe_scheduler_enabled",
+      "fieldtype": "Check",
+      "label": "Enable Scheduler"
+    },
+    {
+      "default": "1",
       "description": "Calculate and store duplicate hit counts on CRM Leads.",
       "fieldname": "crm_lead_dedupe_hit_count_enabled",
       "fieldtype": "Check",
@@ -81,6 +95,46 @@
       "fieldname": "crm_lead_dedupe_permission_filter_enabled",
       "fieldtype": "Check",
       "label": "Enable Permission Filter"
+    },
+    {
+      "fieldname": "section_scheduler",
+      "fieldtype": "Section Break",
+      "label": "Scheduler Limits"
+    },
+    {
+      "default": "2000",
+      "description": "Maximum pending CRM Leads inspected by each scheduler run.",
+      "fieldname": "crm_lead_dedupe_max_pending_leads",
+      "fieldtype": "Int",
+      "label": "Max Pending Leads Per Run"
+    },
+    {
+      "default": "500",
+      "description": "Maximum distinct mobile groups processed by each scheduler run.",
+      "fieldname": "crm_lead_dedupe_max_mobile_groups",
+      "fieldtype": "Int",
+      "label": "Max Mobile Groups Per Run"
+    },
+    {
+      "default": "100",
+      "description": "Maximum duplicate CRM Leads merged by each scheduler run.",
+      "fieldname": "crm_lead_dedupe_max_merges_per_run",
+      "fieldtype": "Int",
+      "label": "Max Merges Per Run"
+    },
+    {
+      "default": "100",
+      "description": "Mobile groups larger than this are skipped to avoid unsafe bulk merges.",
+      "fieldname": "crm_lead_dedupe_max_group_size",
+      "fieldtype": "Int",
+      "label": "Max Group Size"
+    },
+    {
+      "default": "0000000000\n1111111111\n2222222222\n3333333333\n4444444444\n5555555555\n6666666666\n7777777777\n8888888888\n9999999999\n1234567890",
+      "description": "One mobile key per line. These normalized mobile numbers are never auto-merged.",
+      "fieldname": "crm_lead_dedupe_blocked_mobiles",
+      "fieldtype": "Small Text",
+      "label": "Blocked Mobile Numbers"
     }
   ],
   "issingle": 1,

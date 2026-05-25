@@ -51,21 +51,9 @@ def archive_group_for_mobile_pipeline(mobile: str | None = None, pipeline: str |
     return "ok"
 
 def archive_group_for_doc(doc, method=None):
-    """Hook target: sync old and new duplicate groups for this lead."""
+    """Hook target kept lightweight; scheduler performs group sync and merge."""
     if not is_enabled("hooks"):
         log_operation("archive_group_for_doc.skipped", lead_name=doc.name, method=method, reason="hooks_disabled")
         return
-    log_operation("archive_group_for_doc.start", lead_name=doc.name, method=method)
-    old_group_key = getattr(doc.flags, "crm_lead_dedupe_old_group_key", None)
-    if old_group_key:
-        log_operation("archive_group_for_doc.old_group", lead_name=doc.name, old_group_key=old_group_key)
-        sync_duplicate_group(*old_group_key)
-
     mobile_norm = getattr(doc, "sr_mobile_norm", None) or norm_mobile(getattr(doc, "mobile_no", ""))
-    pipeline = getattr(doc, "sr_lead_pipeline", None)
-    sync_duplicate_group(
-        mobile_norm,
-        pipeline,
-        mark_unseen_for_primary=bool(getattr(doc.flags, "crm_lead_dedupe_mark_unseen_hit", False)),
-    )
-    log_operation("archive_group_for_doc.done", lead_name=doc.name, mobile_norm=mobile_norm, pipeline=pipeline)
+    log_operation("archive_group_for_doc.queued", lead_name=doc.name, method=method, mobile_norm=mobile_norm)

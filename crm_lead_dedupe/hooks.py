@@ -50,3 +50,11 @@ doc_events = {
         "on_update":       "crm_lead_dedupe.api.crm_lead_archive.archive_group_for_doc",
     }
 }
+
+scheduler_events = {
+    "cron": {
+        "*/5 * * * *": [
+            "crm_lead_dedupe.scheduler.run_auto_merge_scheduler",
+        ],
+    },
+}

@@ -6,6 +6,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_THRESHOLD,
     has_working_assignment,
     is_duplicate_match,
+    is_valid_auto_merge_mobile,
     norm_mobile,
     select_primary_row,
     score_duplicate,
@@ -31,6 +32,12 @@ class TestDupUtils(TestCase):
         self.assertEqual(norm_mobile("+91 98765 43210"), "9876543210")
         self.assertEqual(norm_mobile("43210"), "43210")
         self.assertEqual(norm_mobile(None), "")
+
+    def test_auto_merge_mobile_requires_safe_ten_digit_key(self):
+        self.assertTrue(is_valid_auto_merge_mobile("9876543210"))
+        self.assertFalse(is_valid_auto_merge_mobile("43210"))
+        self.assertFalse(is_valid_auto_merge_mobile("0000000000"))
+        self.assertFalse(is_valid_auto_merge_mobile("9999999999"))
 
     def test_same_mobile_only_is_duplicate(self):
         score = score_duplicate(

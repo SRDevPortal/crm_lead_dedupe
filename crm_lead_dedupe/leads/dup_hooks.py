@@ -4,10 +4,9 @@ from crm_lead_dedupe.settings import is_enabled
 from .dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
-    DUPLICATE_THRESHOLD,
-    find_dup_candidates,
+    DEFAULT_BLOCKED_MOBILES,
+    is_valid_auto_merge_mobile,
     norm_mobile,
-    score_duplicate,
 )
 
 
@@ -53,6 +52,36 @@ def _store_old_group_key(doc):
         doc.flags.crm_lead_dedupe_old_group_key = old_key
         return old_key
     return None
+
+
+def _mark_pending_group(mobile_norm: str | None):
+    if not mobile_norm or not frappe.db.has_column("CRM Lead", "sr_dedupe_pending"):
+        return
+    frappe.db.sql(
+        """
+        update `tabCRM Lead`
+        set sr_dedupe_pending = 1,
+            sr_dedupe_status = 'Pending'
+        where sr_mobile_norm = %(mobile_norm)s
+        """,
+        {"mobile_norm": mobile_norm},
+    )
+
+
+def _mark_doc_pending(doc):
+    if not hasattr(doc, "sr_dedupe_pending"):
+        return
+
+    if is_valid_auto_merge_mobile(doc.sr_mobile_norm, DEFAULT_BLOCKED_MOBILES):
+        doc.sr_dedupe_pending = 1
+        if hasattr(doc, "sr_dedupe_status"):
+            doc.sr_dedupe_status = "Pending"
+        if hasattr(doc, "sr_dedupe_error"):
+            doc.sr_dedupe_error = None
+    else:
+        doc.sr_dedupe_pending = 0
+        if hasattr(doc, "sr_dedupe_status"):
+            doc.sr_dedupe_status = "Skipped"
 
 
 def _get_duplicate_of(doc) -> str:
@@ -120,67 +149,31 @@ def on_validate(doc, method=None):
 
 def on_before_save(doc, method=None):
     """
-    - Normalize mobile
-    - Find/score candidates with the same normalized mobile
-    - Set duplicate flags on non-primary rows
-    - Maintain JSON summary for quick debug
-    - Store old group key so post-save sync can repair both old and new groups
+    Keep Lead saves cheap. The 5-minute scheduler performs duplicate lookup and
+    merge by mobile group after the Lead transaction is complete.
     """
     if not is_enabled("hooks"):
         log_operation("lead_before_save.skipped", lead_name=doc.name, reason="hooks_disabled")
         return
 
-    # Normalize mobile
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
     old_key = _store_old_group_key(doc)
+    if old_key:
+        _mark_pending_group(old_key[0])
 
-    cands = find_dup_candidates(
-        doc.sr_mobile_norm,
-        exclude_name=doc.name,
-        pipeline=doc.get("sr_lead_pipeline"),
-    )
-    duplicate_cands = []
+    if not getattr(frappe.flags, "crm_lead_dedupe_scheduler", False):
+        _mark_doc_pending(doc)
 
-    # Score and pick best
-    best, best_score = None, 0.0
-    for c in cands:
-        sc = score_duplicate(doc, c)
-        if sc >= DUPLICATE_THRESHOLD:
-            duplicate_cands.append(c)
-        if sc > best_score:
-            best, best_score = c, sc
-
-    # Primary (newest) should NOT be marked duplicate
-    doc_is_primary = bool(doc.name) and _is_newest_in_group(doc)
-
-    if not doc_is_primary and best and best_score >= DUPLICATE_THRESHOLD:
-        doc.sr_is_duplicate = 1
-        _set_duplicate_of(doc, best["name"])
-        doc.sr_duplicate_score = best_score
-    else:
-        doc.sr_is_duplicate = 0
-        _set_duplicate_of(doc)
-        doc.sr_duplicate_score = best_score or 0
-    # quick stats / debug
-    doc.sr_dup_hit_count = len(duplicate_cands)
-    doc.sr_dup_candidates_json = None
     doc.flags.crm_lead_dedupe_mark_unseen_hit = bool(
-        duplicate_cands and (doc.is_new() or old_key)
+        doc.sr_mobile_norm and (doc.is_new() or old_key)
     )
-    if duplicate_cands:
-        try:
-            doc.sr_dup_candidates_json = frappe.as_json(duplicate_cands[:5])
-        except Exception:
-            pass
+
     log_operation(
         "lead_before_save",
         lead_name=doc.name,
         is_new=doc.is_new(),
         mobile_norm=doc.sr_mobile_norm,
-        candidate_count=len(cands),
-        duplicate_count=len(duplicate_cands),
-        best_duplicate=best.get("name") if best else None,
-        best_score=best_score,
-        is_duplicate=doc.sr_is_duplicate,
-        duplicate_of=_get_duplicate_of(doc),
+        pending=getattr(doc, "sr_dedupe_pending", None),
+        status=getattr(doc, "sr_dedupe_status", None),
+        old_group_key=old_key,
     )
