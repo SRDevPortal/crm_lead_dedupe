@@ -356,6 +356,12 @@ function _ld_columns_from_dialog(dialog) {
 // ---------- main modal ----------
 async function openCRMLeadDuplicatesDialog({ primary_name }) {
   try {
+    const settings = (frappe.boot && frappe.boot.crm_lead_dedupe) || {};
+    if (settings.enabled === false || settings.ui_enabled === false) {
+      frappe.msgprint('CRM Lead Dedupe is disabled for this site.');
+      return;
+    }
+
     if (!primary_name) return;
 
     const d = new frappe.ui.Dialog({
@@ -400,6 +406,7 @@ async function openCRMLeadDuplicatesDialog({ primary_name }) {
       );
     }
 
+    const mergeEnabled = settings.merge_enabled !== false;
     const body = `
       ${_ld_css_block()}
       <div class="ld-wrap">
@@ -418,7 +425,7 @@ async function openCRMLeadDuplicatesDialog({ primary_name }) {
           ${rows.length ? _ld_build_table(rows, selectedColumnKeys, checkedNames) : "<p class='ld-muted'>No duplicates found.</p>"}
         </div>
         <div class="ld-actions">
-          <button class="btn btn-danger" data-action="merge">Merge Selected -> Primary</button>
+          ${mergeEnabled ? '<button class="btn btn-danger" data-action="merge">Merge Selected -> Primary</button>' : ''}
           <button class="btn btn-default" data-action="close">Close</button>
         </div>
       </div>
