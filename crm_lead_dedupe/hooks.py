@@ -11,6 +11,7 @@ required_apps = ["crm"]
 # before_install = "crm_lead_dedupe.install.before_install"
 after_install = "crm_lead_dedupe.install.after_install"
 after_migrate = "crm_lead_dedupe.install.after_migrate"
+boot_session = "crm_lead_dedupe.settings.boot_session"
 
 # Uninstallation
 # before_uninstall = "crm_lead_dedupe.uninstall.before_uninstall"
