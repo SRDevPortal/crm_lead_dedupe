@@ -1,6 +1,7 @@
 import re
 import frappe
 from frappe.utils import cint, now_datetime
+from crm_lead_dedupe.logging import log_operation
 
 
 DT = "CRM Lead"
@@ -204,8 +205,15 @@ def sync_duplicate_group(
 ):
     """Recompute archive, duplicate flags, and hit counts for a duplicate group."""
     if not mobile_norm:
+        log_operation("sync_duplicate_group.skipped", reason="missing_mobile_norm", pipeline=pipeline)
         return
 
+    log_operation(
+        "sync_duplicate_group.start",
+        mobile_norm=mobile_norm,
+        pipeline=pipeline,
+        mark_unseen_for_primary=mark_unseen_for_primary,
+    )
     rows = frappe.get_all(
         DT,
         filters=duplicate_filters(mobile_norm, pipeline),
@@ -213,6 +221,7 @@ def sync_duplicate_group(
         order_by="creation desc",
     )
     if not rows:
+        log_operation("sync_duplicate_group.done", mobile_norm=mobile_norm, pipeline=pipeline, row_count=0)
         return
 
     updates = {}
@@ -273,13 +282,33 @@ def sync_duplicate_group(
         updates[row["name"]] = values
 
     _bulk_update(updates)
+    log_operation(
+        "sync_duplicate_group.updated",
+        mobile_norm=mobile_norm,
+        pipeline=pipeline,
+        row_count=len(rows),
+        primary=primary_name,
+        relink_count=len(relink_to_primary),
+    )
     if relink_to_primary:
         try:
             from crm_lead_dedupe.integrations.wa_chat_hub import relink_crm_lead_conversations
 
             relink_crm_lead_conversations(primary_name, relink_to_primary)
+            log_operation(
+                "sync_duplicate_group.relinked_chat",
+                mobile_norm=mobile_norm,
+                primary=primary_name,
+                relink_count=len(relink_to_primary),
+            )
         except Exception:
             frappe.log_error(frappe.get_traceback(), "WA Chat Hub Lead Relink Failed")
+            log_operation(
+                "sync_duplicate_group.relink_chat_failed",
+                mobile_norm=mobile_norm,
+                primary=primary_name,
+                relink_count=len(relink_to_primary),
+            )
 
 
 def recompute_hit_counts(mobile_norm: str):
