@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from crm_lead_dedupe.logging import log_operation
 from crm_lead_dedupe.leads.dup_utils import DUPLICATE_OF_FIELD, LEGACY_DUPLICATE_OF_FIELD
 from crm_lead_dedupe.leads.perm import can_manage_dedupe
 
@@ -21,7 +22,9 @@ def _is_newest(name: str) -> bool:
 @frappe.whitelist()
 def fix_duplicate_of_if_stale(name: str):
     """Clear sr_duplicate_of if target is missing, archived, or this row is the newest (primary)."""
+    log_operation("fix_duplicate_of_if_stale.start", lead_name=name)
     if not name or not frappe.db.exists("CRM Lead", name):
+        log_operation("fix_duplicate_of_if_stale.done", lead_name=name, skipped="missing_lead")
         return
     if not can_manage_dedupe() and not frappe.has_permission("CRM Lead", "write", name):
         frappe.throw(_("Not permitted to fix duplicate metadata."), frappe.PermissionError)
@@ -32,6 +35,7 @@ def fix_duplicate_of_if_stale(name: str):
     row = frappe.db.get_value("CRM Lead", name, fields, as_dict=True) or {}
     dup = row.get(DUPLICATE_OF_FIELD) or row.get(LEGACY_DUPLICATE_OF_FIELD)
     if not dup:
+        log_operation("fix_duplicate_of_if_stale.done", lead_name=name, skipped="no_duplicate_link")
         return
 
     clear = False
@@ -52,3 +56,6 @@ def fix_duplicate_of_if_stale(name: str):
             values[LEGACY_DUPLICATE_OF_FIELD] = None
         frappe.db.set_value("CRM Lead", name, values, update_modified=False)
         frappe.db.commit()
+        log_operation("fix_duplicate_of_if_stale.cleared", lead_name=name, duplicate_of=dup)
+    else:
+        log_operation("fix_duplicate_of_if_stale.done", lead_name=name, duplicate_of=dup, skipped="still_valid")
