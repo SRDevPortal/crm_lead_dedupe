@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from crm_lead_dedupe.settings import is_enabled
 
 ARCHIVE_VIEW_ROLES = {"System Manager", "CRM Manager", "Sales Manager"}
 DEDUPE_MANAGER_ROLES = ARCHIVE_VIEW_ROLES
@@ -51,10 +52,15 @@ def require_lead_read(name: str, user: str | None = None):
 def pqc_crm_lead(user, doctype=None):
     # Normal list/report queries should stay active-only. Manager-only archive
     # actions use direct permission checks and dedicated APIs when needed.
+    if not is_enabled("permission_filter"):
+        return None
     return ACTIVE_LEAD_CONDITION
 
 
 def crm_lead_has_permission(doc, ptype, user):
+    if not is_enabled("permission_filter"):
+        return None
+
     if can_view_archived(user):
         return None
 
