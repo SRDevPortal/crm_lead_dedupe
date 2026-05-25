@@ -125,26 +125,12 @@
       listview.crm_lead_dedupe_render_wrapped = true;
       listview.render = function () {
         originalRender();
-        scheduleHitRefresh();
+        scheduleHitDecorate();
       };
     }
 
-    // 5) Refresh hit counts from server, then decorate visible rows.
-    function refreshHitCounts() {
-      const names = (listview.data || []).map(doc => doc.name).filter(Boolean);
-      if (!names.length) return;
-
-      frappe.call({
-        method: 'crm_lead_dedupe.api.crm_lead_duplicates.get_hit_counts_for_crm_leads',
-        args: { lead_names: names },
-        callback(r) {
-          const counts = (r.message && r.message.result) || {};
-          decorateRows(counts);
-        }
-      });
-    }
-
-    function decorateRows(counts = {}) {
+    // 5) Decorate rows from fields already loaded with the list data.
+    function decorateRows() {
       const rows = listview.data || [];
       if (!rows.length) return;
 
@@ -162,14 +148,8 @@
 
         $subject.find('.sr-hit-btn').remove();
 
-        const server = counts[doc.name] || {};
-        const serverCount = server.hit_count;
-        const hits = cint(serverCount || doc.sr_dup_hit_count || 0);
-        const unseenHit = cint(
-          Object.prototype.hasOwnProperty.call(server, 'unseen_hit')
-            ? server.unseen_hit
-            : (doc.sr_dup_unseen_hit || 0)
-        );
+        const hits = cint(doc.sr_dup_hit_count || 0);
+        const unseenHit = cint(doc.sr_dup_unseen_hit || 0);
         $row.toggleClass('sr-dup-flash', Boolean(unseenHit));
         if (!hits) return;
 
@@ -196,28 +176,17 @@
       });
     }
 
-    function scheduleHitRefresh() {
+    function scheduleHitDecorate() {
       clearTimeout(listview.crm_lead_dedupe_hit_timer);
-      listview.crm_lead_dedupe_hit_timer = setTimeout(refreshHitCounts, 80);
+      listview.crm_lead_dedupe_hit_timer = setTimeout(decorateRows, 100);
     }
 
-    listview.crm_lead_dedupe_decorate = scheduleHitRefresh;
-    scheduleHitRefresh();
-
-    // And on any DOM updates (paging, filters, quick edits, virtualized reflow).
-    const target = listview.$result.get(0);
-    if (target) {
-      if (listview.crm_lead_dedupe_observer) {
-        listview.crm_lead_dedupe_observer.disconnect();
-      }
-      const debounced = frappe.utils.debounce(scheduleHitRefresh, 80);
-      listview.crm_lead_dedupe_observer = new MutationObserver(() => debounced());
-      listview.crm_lead_dedupe_observer.observe(target, { childList: true, subtree: true });
-    }
+    listview.crm_lead_dedupe_decorate = scheduleHitDecorate;
+    scheduleHitDecorate();
 
     // Optional belt-and-suspenders: re-decorate on list refresh events
     if (typeof listview.on === 'function') {
-      listview.on('refresh', scheduleHitRefresh);
+      listview.on('refresh', scheduleHitDecorate);
     }
   }
 })();
