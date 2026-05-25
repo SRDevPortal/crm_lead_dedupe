@@ -2,6 +2,7 @@
 import time
 
 import frappe
+from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.perm import require_dedupe_manager
 
 from crm_lead_dedupe.leads.dup_utils import (
@@ -202,6 +203,10 @@ def ensure_indexes():
 
 
 def backfill_mobile_norm():
+    if not is_enabled("hooks"):
+        _log_backfill("backfill_mobile_norm skipped: hooks_disabled")
+        return
+
     if not frappe.db.has_column(DT, "mobile_no") or not frappe.db.has_column(DT, "sr_mobile_norm"):
         return
 
@@ -260,6 +265,10 @@ def clear_legacy_duplicate_links_batched(
     log_to_console: bool = True,
 ):
     require_dedupe_manager()
+    if not is_enabled("hooks"):
+        result = {"processed": 0, "done": True, "skipped": "hooks_disabled"}
+        _log_backfill(f"legacy_links skipped: hooks_disabled result={result}", log_to_console)
+        return result
     log_records = _as_bool(log_records)
     if not frappe.db.has_column(DT, LEGACY_DUPLICATE_OF_FIELD):
         _set_progress("legacy_done", "1")
@@ -324,6 +333,10 @@ def backfill_mobile_norm_batched(
     log_to_console: bool = True,
 ):
     require_dedupe_manager()
+    if not is_enabled("hooks"):
+        result = {"processed": 0, "updated": 0, "done": True, "skipped": "hooks_disabled"}
+        _log_backfill(f"normalize skipped: hooks_disabled result={result}", log_to_console)
+        return result
     log_records = _as_bool(log_records)
     if not frappe.db.has_column(DT, "mobile_no") or not frappe.db.has_column(DT, "sr_mobile_norm"):
         _set_progress("normalize_done", "1")
@@ -408,6 +421,10 @@ def sync_duplicate_groups_batched(
     log_to_console: bool = True,
 ):
     require_dedupe_manager()
+    if not is_enabled("hooks"):
+        result = {"processed": 0, "done": True, "skipped": "hooks_disabled"}
+        _log_backfill(f"group_sync skipped: hooks_disabled result={result}", log_to_console)
+        return result
     log_records = _as_bool(log_records)
     if not frappe.db.has_column(DT, "sr_mobile_norm") or not frappe.db.has_column(DT, "sr_dup_hit_count"):
         _set_progress("groups_done", "1")
@@ -483,6 +500,10 @@ def run_backfill_batch(
     log_to_console: bool = True,
 ):
     require_dedupe_manager()
+    if not is_enabled("hooks"):
+        result = {"done": True, "skipped": "hooks_disabled"}
+        _log_backfill(f"backfill_batch skipped: hooks_disabled result={result}", log_to_console)
+        return result
     log_records = _as_bool(log_records)
     ensure_indexes()
 
@@ -529,6 +550,10 @@ def run_backfill_until_done(
     log_to_console: bool = True,
 ):
     require_dedupe_manager()
+    if not is_enabled("hooks"):
+        summary = {"batches": 0, "done": True, "skipped": "hooks_disabled"}
+        _log_backfill(f"backfill_until_done skipped: hooks_disabled summary={summary}", log_to_console)
+        return summary
     max_batches = max(1, int(max_batches or 200))
     sleep_seconds = max(0, float(sleep_seconds or 0))
     log_records = _as_bool(log_records)
