@@ -1,11 +1,15 @@
 import frappe
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.dup_utils import norm_mobile, sync_duplicate_group
 from crm_lead_dedupe.leads.perm import require_dedupe_manager
 
 @frappe.whitelist()
 def backfill_archive_mobile_pipeline_groups():
     require_dedupe_manager()
+    if not is_enabled("archive"):
+        log_operation("backfill_archive_groups.skipped", reason="archive_disabled")
+        return {"groups": 0, "skipped": "archive_disabled"}
     log_operation("backfill_archive_groups.start")
     pipeline_column = "sr_lead_pipeline" if frappe.db.has_column("CRM Lead", "sr_lead_pipeline") else "''"
     groups = frappe.db.sql(
@@ -27,6 +31,9 @@ def backfill_archive_mobile_pipeline_groups():
 
 def _archive_group(mobile_norm: str | None):
     """Backward-compatible wrapper for older callers."""
+    if not is_enabled("archive"):
+        log_operation("archive_group.skipped", mobile_norm=mobile_norm, reason="archive_disabled")
+        return
     log_operation("archive_group.start", mobile_norm=mobile_norm)
     sync_duplicate_group(mobile_norm)
     log_operation("archive_group.done", mobile_norm=mobile_norm)
@@ -34,6 +41,9 @@ def _archive_group(mobile_norm: str | None):
 @frappe.whitelist()
 def archive_group_for_mobile_pipeline(mobile: str | None = None, pipeline: str | None = None):
     require_dedupe_manager()
+    if not is_enabled("archive"):
+        log_operation("archive_group_for_mobile_pipeline.skipped", mobile=mobile, pipeline=pipeline, reason="archive_disabled")
+        return "skipped"
     log_operation("archive_group_for_mobile_pipeline.start", mobile=mobile, pipeline=pipeline)
     sync_duplicate_group(mobile, pipeline)
     frappe.db.commit()
@@ -42,6 +52,9 @@ def archive_group_for_mobile_pipeline(mobile: str | None = None, pipeline: str |
 
 def archive_group_for_doc(doc, method=None):
     """Hook target: sync old and new duplicate groups for this lead."""
+    if not is_enabled("hooks"):
+        log_operation("archive_group_for_doc.skipped", lead_name=doc.name, method=method, reason="hooks_disabled")
+        return
     log_operation("archive_group_for_doc.start", lead_name=doc.name, method=method)
     old_group_key = getattr(doc.flags, "crm_lead_dedupe_old_group_key", None)
     if old_group_key:
