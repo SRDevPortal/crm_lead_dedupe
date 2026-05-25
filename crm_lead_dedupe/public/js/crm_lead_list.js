@@ -4,7 +4,7 @@
   const existingSettings = frappe.listview_settings[doctype] || {};
   const existingOnload = existingSettings.onload;
   const existingRefresh = existingSettings.refresh;
-  const dedupeFields = crmLeadDedupeEnabled('ui_enabled')
+  const dedupeFields = crmLeadDedupeEnabled('ui_enabled', 'hit_count_enabled')
     ? ['sr_dup_hit_count', 'sr_dup_unseen_hit', 'lead_name']
     : [];
 
@@ -45,6 +45,7 @@
 
     window.crm_lead_dedupe_open_duplicates = async function (name) {
       if (!name) return;
+      if (!crmLeadDedupeEnabled('ui_enabled')) return;
       if (!window.openCRMLeadDuplicatesDialog) {
         await new Promise(resolve => frappe.require('/assets/crm_lead_dedupe/js/crm_lead_modal.js', resolve));
       }
@@ -59,11 +60,15 @@
       await window.crm_lead_dedupe_open_duplicates(name);
     }
 
-    removeArchivedFilterFromRoute(listview);
+    if (crmLeadDedupeEnabled('permission_filter_enabled')) {
+      removeArchivedFilterFromRoute(listview);
+    }
 
     // 1) Prefer duplicates first
-    listview.sort_by = 'sr_dup_hit_count';
-    listview.sort_order = 'desc';
+    if (crmLeadDedupeEnabled('hit_count_enabled')) {
+      listview.sort_by = 'sr_dup_hit_count';
+      listview.sort_order = 'desc';
+    }
 
     // 2) Minimal CSS for a compact pill
     if (!document.getElementById('sr-hit-btn-style')) {
@@ -136,6 +141,12 @@
 
     // 5) Decorate rows from fields already loaded with the list data.
     function decorateRows() {
+      if (!crmLeadDedupeEnabled('ui_enabled', 'hit_count_enabled')) {
+        listview.$result.find('.sr-hit-btn').remove();
+        listview.$result.find('.sr-dup-flash').removeClass('sr-dup-flash');
+        return;
+      }
+
       const rows = listview.data || [];
       if (!rows.length) return;
 
@@ -196,9 +207,9 @@
   }
 })();
 
-function crmLeadDedupeEnabled(feature) {
+function crmLeadDedupeEnabled(...features) {
   const settings = (frappe.boot && frappe.boot.crm_lead_dedupe) || {};
-  return settings.enabled !== false && settings[feature] !== false;
+  return settings.enabled !== false && features.every(feature => settings[feature] !== false);
 }
 
 function removeArchivedFilterFromRoute(listview) {

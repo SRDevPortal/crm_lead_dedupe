@@ -70,7 +70,7 @@ frappe.ui.form.on('CRM Lead', {
     }
 
     // Active records: show duplicates button if there are hits
-    if (!frm.is_new() && cint(frm.doc.sr_dup_hit_count) > 0) {
+    if (crmLeadDedupeEnabled('hit_count_enabled') && !frm.is_new() && cint(frm.doc.sr_dup_hit_count) > 0) {
       frm.add_custom_button('View & Merge Duplicates', async () => {
         if (!window.openCRMLeadDuplicatesDialog) {
           await new Promise(resolve => frappe.require('/assets/crm_lead_dedupe/js/crm_lead_modal.js', resolve));
@@ -85,7 +85,7 @@ frappe.ui.form.on('CRM Lead', {
   }
 });
 
-function crmLeadDedupeEnabled(feature) {
+function crmLeadDedupeEnabled(...features) {
   const settings = (frappe.boot && frappe.boot.crm_lead_dedupe) || {};
-  return settings.enabled !== false && settings[feature] !== false;
+  return settings.enabled !== false && features.every(feature => settings[feature] !== false);
 }

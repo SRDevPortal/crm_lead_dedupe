@@ -443,6 +443,11 @@ async function openCRMLeadDuplicatesDialog({ primary_name }) {
     }
 
     d.$body.find('[data-action="merge"]').on('click', async () => {
+      if (settings.merge_enabled === false) {
+        frappe.msgprint('CRM Lead Dedupe merge is disabled for this site.');
+        return;
+      }
+
       const names = Array.from(_ld_checked_names(d.$body, []));
 
       if (!names.length) return frappe.msgprint('Select at least one row to merge.');
