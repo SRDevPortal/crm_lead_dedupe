@@ -1,6 +1,7 @@
 import json
 
 import frappe
+from crm_lead_dedupe.settings import get_setting
 
 
 LOGGER_NAME = "crm_lead_dedupe"
@@ -42,5 +43,5 @@ def log_operation(event, **context):
     except Exception:
         pass
 
-    if frappe.conf.get("crm_lead_dedupe_console_log", 1):
+    if get_setting("crm_lead_dedupe_console_log"):
         print(message, flush=True)
