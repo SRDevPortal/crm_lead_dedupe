@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.dup_utils import DUPLICATE_OF_FIELD, LEGACY_DUPLICATE_OF_FIELD
 from crm_lead_dedupe.leads.perm import can_manage_dedupe
 
@@ -23,6 +24,9 @@ def _is_newest(name: str) -> bool:
 def fix_duplicate_of_if_stale(name: str):
     """Clear sr_duplicate_of if target is missing, archived, or this row is the newest (primary)."""
     log_operation("fix_duplicate_of_if_stale.start", lead_name=name)
+    if not is_enabled("hooks"):
+        log_operation("fix_duplicate_of_if_stale.done", lead_name=name, skipped="hooks_disabled")
+        return
     if not name or not frappe.db.exists("CRM Lead", name):
         log_operation("fix_duplicate_of_if_stale.done", lead_name=name, skipped="missing_lead")
         return
