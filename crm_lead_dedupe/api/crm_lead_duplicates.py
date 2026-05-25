@@ -1,6 +1,7 @@
 import frappe
 from frappe.utils import cint
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_THRESHOLD,
     find_dup_candidates,
@@ -158,6 +159,10 @@ def get_duplicates_for_crm_lead(lead_name: str, columns=None):
         return []
 
     log_operation("get_duplicates.start", lead_name=lead_name)
+    if not is_enabled("ui"):
+        log_operation("get_duplicates.done", lead_name=lead_name, duplicate_count=0, reason="ui_disabled")
+        return []
+
     require_lead_read(lead_name)
     lead = frappe.get_doc("CRM Lead", lead_name)
     m = norm_mobile(lead.mobile_no or "")
@@ -197,6 +202,10 @@ def get_hit_counts_for_crm_leads(lead_names):
         return {"success": True, "result": {}}
 
     log_operation("get_hit_counts.start", lead_count=len(names))
+    if not is_enabled("hit_count"):
+        log_operation("get_hit_counts.done", lead_count=len(names), skipped="hit_count_disabled")
+        return {"success": True, "result": {name: {"hit_count": 0, "unseen_hit": 0} for name in names}}
+
     result = {name: {"hit_count": 0, "unseen_hit": 0} for name in names}
     rows = frappe.get_all(
         DT,
@@ -273,6 +282,10 @@ def get_hit_counts_for_crm_leads(lead_names):
 @frappe.whitelist()
 def acknowledge_duplicate_hit(lead_name: str):
     log_operation("acknowledge_duplicate_hit.start", lead_name=lead_name)
+    if not is_enabled("ui"):
+        log_operation("acknowledge_duplicate_hit.done", lead_name=lead_name, skipped="ui_disabled")
+        return {"success": True}
+
     require_lead_read(lead_name)
 
     if not frappe.db.has_column(DT, "sr_dup_unseen_hit"):
