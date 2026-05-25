@@ -15,8 +15,8 @@ frappe.ui.form.on('CRM Lead', {
   },
 
   after_save(frm) {
-    if (cur_list && cur_list.doctype === 'CRM Lead') {
-      cur_list.refresh();
+    if (window.cur_list && window.cur_list.doctype === 'CRM Lead') {
+      window.cur_list.refresh();
     }
   },
 
