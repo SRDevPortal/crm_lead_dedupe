@@ -1,0 +1,108 @@
+{
+  "actions": [],
+  "creation": "2026-05-25 11:45:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "section_master",
+    "crm_lead_dedupe_enabled",
+    "crm_lead_dedupe_console_log",
+    "section_features",
+    "crm_lead_dedupe_ui_enabled",
+    "crm_lead_dedupe_hooks_enabled",
+    "crm_lead_dedupe_archive_enabled",
+    "crm_lead_dedupe_merge_enabled",
+    "crm_lead_dedupe_hit_count_enabled",
+    "crm_lead_dedupe_permission_filter_enabled"
+  ],
+  "fields": [
+    {
+      "fieldname": "section_master",
+      "fieldtype": "Section Break",
+      "label": "Master"
+    },
+    {
+      "default": "1",
+      "description": "Master kill switch. When disabled, all CRM Lead Dedupe features are skipped.",
+      "fieldname": "crm_lead_dedupe_enabled",
+      "fieldtype": "Check",
+      "label": "Enable CRM Lead Dedupe"
+    },
+    {
+      "default": "1",
+      "description": "Print compact CRM Lead Dedupe operation logs to server console.",
+      "fieldname": "crm_lead_dedupe_console_log",
+      "fieldtype": "Check",
+      "label": "Enable Console Logs"
+    },
+    {
+      "fieldname": "section_features",
+      "fieldtype": "Section Break",
+      "label": "Feature Switches"
+    },
+    {
+      "default": "1",
+      "description": "Show duplicate hit buttons, form actions, and duplicate modal.",
+      "fieldname": "crm_lead_dedupe_ui_enabled",
+      "fieldtype": "Check",
+      "label": "Enable UI"
+    },
+    {
+      "default": "1",
+      "description": "Run duplicate detection hooks when CRM Leads are saved or updated.",
+      "fieldname": "crm_lead_dedupe_hooks_enabled",
+      "fieldtype": "Check",
+      "label": "Enable Save Hooks"
+    },
+    {
+      "default": "1",
+      "description": "Allow duplicate-group sync to archive/unarchive duplicate CRM Leads.",
+      "fieldname": "crm_lead_dedupe_archive_enabled",
+      "fieldtype": "Check",
+      "label": "Enable Auto Archive"
+    },
+    {
+      "default": "1",
+      "description": "Allow duplicate records to be merged into a primary CRM Lead.",
+      "fieldname": "crm_lead_dedupe_merge_enabled",
+      "fieldtype": "Check",
+      "label": "Enable Merge"
+    },
+    {
+      "default": "1",
+      "description": "Calculate and store duplicate hit counts on CRM Leads.",
+      "fieldname": "crm_lead_dedupe_hit_count_enabled",
+      "fieldtype": "Check",
+      "label": "Enable Hit Count"
+    },
+    {
+      "default": "1",
+      "description": "Hide archived and converted CRM Leads from normal list/report queries.",
+      "fieldname": "crm_lead_dedupe_permission_filter_enabled",
+      "fieldtype": "Check",
+      "label": "Enable Permission Filter"
+    }
+  ],
+  "issingle": 1,
+  "istable": 0,
+  "links": [],
+  "modified": "2026-05-25 11:45:00.000000",
+  "modified_by": "Administrator",
+  "module": "CRM Lead Dedupe",
+  "name": "CRM Lead Dedupe Settings",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "read": 1,
+      "role": "System Manager",
+      "write": 1
+    }
+  ],
+  "row_format": "Dynamic",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1
+}
