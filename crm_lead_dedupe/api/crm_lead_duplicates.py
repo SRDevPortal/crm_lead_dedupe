@@ -207,22 +207,14 @@ def get_hit_counts_for_crm_leads(lead_names):
         return {"success": True, "result": {name: {"hit_count": 0, "unseen_hit": 0} for name in names}}
 
     result = {name: {"hit_count": 0, "unseen_hit": 0} for name in names}
-    rows = frappe.get_all(
+    rows = frappe.get_list(
         DT,
         filters={"name": ["in", names]},
         fields=_count_fields(),
         limit_page_length=0,
     )
     rows_by_name = {row.name: row for row in rows}
-    visible_rows = []
-
-    for name in names:
-        row = rows_by_name.get(name)
-        if not row:
-            continue
-        if not frappe.has_permission("CRM Lead", "read", row.name):
-            continue
-        visible_rows.append(row)
+    visible_rows = [rows_by_name[name] for name in names if name in rows_by_name]
 
     mobile_norms = {
         row.sr_mobile_norm or norm_mobile(row.mobile_no)
@@ -233,39 +225,23 @@ def get_hit_counts_for_crm_leads(lead_names):
         log_operation("get_hit_counts.done", lead_count=len(names), mobile_group_count=0, candidate_count=0)
         return {"success": True, "result": result}
 
-    candidate_rows = frappe.get_all(
+    candidate_counts = frappe.get_list(
         DT,
         filters={"sr_mobile_norm": ["in", list(mobile_norms)]},
-        fields=_count_fields(),
+        fields=["sr_mobile_norm", "count(name) as hit_count"],
+        group_by="sr_mobile_norm",
         limit_page_length=0,
     )
-
-    user_can_manage = can_manage_dedupe()
-    permission_cache = {}
-    candidates_by_mobile = {}
-
-    for candidate in candidate_rows:
-        candidate_mobile = candidate.sr_mobile_norm or norm_mobile(candidate.mobile_no)
-        if not candidate_mobile:
-            continue
-
-        if not user_can_manage:
-            if candidate.name not in permission_cache:
-                permission_cache[candidate.name] = frappe.has_permission("CRM Lead", "read", candidate.name)
-            if not permission_cache[candidate.name]:
-                continue
-
-        candidates_by_mobile.setdefault(candidate_mobile, []).append(candidate)
+    counts_by_mobile = {row.sr_mobile_norm: cint(row.hit_count) for row in candidate_counts}
 
     for row in visible_rows:
         mobile_norm = row.sr_mobile_norm or norm_mobile(row.mobile_no)
-        candidates = [
-            candidate for candidate in candidates_by_mobile.get(mobile_norm, [])
-            if candidate.name != row.name and score_duplicate(row, candidate) >= DUPLICATE_THRESHOLD
-        ]
 
         result[row.name] = {
-            "hit_count": len(candidates),
+            # score_duplicate is exact normalized-mobile equality, so the
+            # candidate count is the permission-filtered mobile group size
+            # minus the current row.
+            "hit_count": max(counts_by_mobile.get(mobile_norm, 0) - 1, 0),
             "unseen_hit": cint(row.get("sr_dup_unseen_hit")),
         }
 
@@ -274,7 +250,7 @@ def get_hit_counts_for_crm_leads(lead_names):
         lead_count=len(names),
         visible_count=len(visible_rows),
         mobile_group_count=len(mobile_norms),
-        candidate_count=len(candidate_rows),
+        candidate_group_count=len(candidate_counts),
     )
     return {"success": True, "result": result}
 
