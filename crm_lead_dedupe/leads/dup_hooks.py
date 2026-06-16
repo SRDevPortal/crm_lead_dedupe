@@ -5,6 +5,7 @@ from .dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
     DEFAULT_BLOCKED_MOBILES,
+    duplicate_filters,
     is_valid_auto_merge_mobile,
     norm_mobile,
 )
@@ -18,9 +19,7 @@ def _is_newest_in_group(doc) -> bool:
     """True if this doc is the newest for the normalized mobile group."""
     if not getattr(doc, "sr_mobile_norm", None):
         return False
-    filters = {"sr_mobile_norm": doc.sr_mobile_norm}
-    if doc.get("sr_lead_pipeline") and frappe.db.has_column(doc.doctype, "sr_lead_pipeline"):
-        filters["sr_lead_pipeline"] = doc.get("sr_lead_pipeline")
+    filters = duplicate_filters(doc.sr_mobile_norm, doc.get("sr_lead_pipeline"))
     newest = frappe.db.get_value(
         "CRM Lead",
         filters,
@@ -54,17 +53,17 @@ def _store_old_group_key(doc):
     return None
 
 
-def _mark_pending_group(mobile_norm: str | None):
+def _mark_pending_group(mobile_norm: str | None, pipeline: str | None = None):
     if not mobile_norm or not frappe.db.has_column("CRM Lead", "sr_dedupe_pending"):
         return
-    frappe.db.sql(
-        """
-        update `tabCRM Lead`
-        set sr_dedupe_pending = 1,
-            sr_dedupe_status = 'Pending'
-        where sr_mobile_norm = %(mobile_norm)s
-        """,
-        {"mobile_norm": mobile_norm},
+    filters = duplicate_filters(mobile_norm, pipeline)
+    names = frappe.get_all("CRM Lead", filters=filters, pluck="name", limit_page_length=0)
+    if not names:
+        return
+    frappe.db.bulk_update(
+        "CRM Lead",
+        {name: {"sr_dedupe_pending": 1, "sr_dedupe_status": "Pending"} for name in names},
+        update_modified=False,
     )
 
 
@@ -159,7 +158,7 @@ def on_before_save(doc, method=None):
     doc.sr_mobile_norm = norm_mobile(doc.mobile_no or "")
     old_key = _store_old_group_key(doc)
     if old_key:
-        _mark_pending_group(old_key[0])
+        _mark_pending_group(old_key[0], old_key[1])
 
     if not getattr(frappe.flags, "crm_lead_dedupe_scheduler", False):
         _mark_doc_pending(doc)

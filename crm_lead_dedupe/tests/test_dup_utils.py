@@ -1,4 +1,5 @@
 from unittest import TestCase
+from unittest.mock import patch
 
 import frappe
 
@@ -10,6 +11,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     norm_mobile,
     select_primary_row,
     score_duplicate,
+    duplicate_filters,
 )
 
 
@@ -106,6 +108,29 @@ class TestDupUtils(TestCase):
         ]
 
         self.assertEqual(select_primary_row(rows).name, "OLD-ACTIVE")
+
+    def test_newest_primary_setting_makes_newest_active_lead_win(self):
+        rows = [
+            lead(name="NEW-AGENT-2", creation="2026-05-21 10:00:00", lead_owner="agent2@example.com"),
+            lead(name="OLD-AGENT-1", creation="2026-05-20 10:00:00", lead_owner="agent1@example.com"),
+        ]
+
+        with patch("crm_lead_dedupe.leads.dup_utils.get_setting", return_value=1):
+            self.assertEqual(select_primary_row(rows).name, "NEW-AGENT-2")
+
+    def test_pipeline_scope_adds_pipeline_to_duplicate_filters_when_enabled(self):
+        with (
+            patch("crm_lead_dedupe.leads.dup_utils.get_setting", return_value=1),
+            patch("frappe.db.has_column", return_value=True),
+        ):
+            self.assertEqual(
+                duplicate_filters("9876543210", "Skin"),
+                {"sr_mobile_norm": "9876543210", "sr_lead_pipeline": "Skin"},
+            )
+
+    def test_pipeline_scope_is_disabled_by_default(self):
+        with patch("crm_lead_dedupe.leads.dup_utils.get_setting", return_value=0):
+            self.assertEqual(duplicate_filters("9876543210", "Skin"), {"sr_mobile_norm": "9876543210"})
 
     def test_assign_json_counts_as_working_assignment(self):
         self.assertTrue(has_working_assignment(lead(_assign='["agent@example.com"]')))

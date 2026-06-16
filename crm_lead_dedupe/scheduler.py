@@ -11,7 +11,9 @@ from crm_lead_dedupe.leads.dup_utils import (
     GROUP_STATE_FIELDS,
     LEGACY_DUPLICATE_OF_FIELD,
     _lead_fields,
+    duplicate_filters,
     is_valid_auto_merge_mobile,
+    pipeline_scope_enabled,
     select_primary_row,
     sync_duplicate_group,
 )
@@ -48,10 +50,26 @@ def _has_required_columns() -> bool:
     return all(frappe.db.has_column(DT, fieldname) for fieldname in required)
 
 
-def _pending_mobile_groups(limit: int) -> list[str]:
+def _pending_mobile_groups(limit: int) -> list[frappe._dict]:
+    if pipeline_scope_enabled():
+        rows = frappe.db.sql(
+            f"""
+            select sr_mobile_norm, sr_lead_pipeline, min(modified) as oldest_modified
+            from `tab{DT}`
+            where sr_dedupe_pending = 1
+                and ifnull(sr_mobile_norm, '') != ''
+            group by sr_mobile_norm, sr_lead_pipeline
+            order by oldest_modified asc
+            limit %(limit)s
+            """,
+            {"limit": limit},
+            as_dict=True,
+        )
+        return rows
+
     rows = frappe.db.sql(
         f"""
-        select distinct sr_mobile_norm
+        select distinct sr_mobile_norm, null as sr_lead_pipeline
         from `tab{DT}`
         where sr_dedupe_pending = 1
             and ifnull(sr_mobile_norm, '') != ''
@@ -61,7 +79,7 @@ def _pending_mobile_groups(limit: int) -> list[str]:
         {"limit": limit},
         as_dict=True,
     )
-    return [row.sr_mobile_norm for row in rows]
+    return rows
 
 
 @frappe.whitelist()
@@ -76,20 +94,36 @@ def queue_historical_duplicate_groups(batch_size: int = 500, reset: bool = False
     batch_size = max(1, cint(batch_size) or 500)
     last_mobile_norm = frappe.defaults.get_global_default(HISTORICAL_PROGRESS_KEY) or ""
     blocked = _blocked_mobiles()
-    rows = frappe.db.sql(
-        f"""
-        select sr_mobile_norm, count(*) as total
-        from `tab{DT}`
-        where ifnull(sr_mobile_norm, '') != ''
-            and sr_mobile_norm > %(last_mobile_norm)s
-        group by sr_mobile_norm
-        having count(*) > 1
-        order by sr_mobile_norm asc
-        limit %(batch_size)s
-        """,
-        {"last_mobile_norm": last_mobile_norm, "batch_size": batch_size},
-        as_dict=True,
-    )
+    if pipeline_scope_enabled():
+        rows = frappe.db.sql(
+            f"""
+            select sr_mobile_norm, sr_lead_pipeline, count(*) as total
+            from `tab{DT}`
+            where ifnull(sr_mobile_norm, '') != ''
+                and sr_mobile_norm > %(last_mobile_norm)s
+            group by sr_mobile_norm, sr_lead_pipeline
+            having count(*) > 1
+            order by sr_mobile_norm asc
+            limit %(batch_size)s
+            """,
+            {"last_mobile_norm": last_mobile_norm, "batch_size": batch_size},
+            as_dict=True,
+        )
+    else:
+        rows = frappe.db.sql(
+            f"""
+            select sr_mobile_norm, null as sr_lead_pipeline, count(*) as total
+            from `tab{DT}`
+            where ifnull(sr_mobile_norm, '') != ''
+                and sr_mobile_norm > %(last_mobile_norm)s
+            group by sr_mobile_norm
+            having count(*) > 1
+            order by sr_mobile_norm asc
+            limit %(batch_size)s
+            """,
+            {"last_mobile_norm": last_mobile_norm, "batch_size": batch_size},
+            as_dict=True,
+        )
 
     if not rows:
         return {"queued_groups": 0, "last_mobile_norm": last_mobile_norm, "done": True}
@@ -101,6 +135,7 @@ def queue_historical_duplicate_groups(batch_size: int = 500, reset: bool = False
         pending = 1 if status == "Pending" else 0
         _set_group_status(
             mobile_norm,
+            row.get("sr_lead_pipeline"),
             status,
             None if pending else "Unsafe or invalid mobile number",
             pending=pending,
@@ -118,17 +153,17 @@ def queue_historical_duplicate_groups(batch_size: int = 500, reset: bool = False
     }
 
 
-def _group_rows(mobile_norm: str):
+def _group_rows(mobile_norm: str, pipeline: str | None = None):
     return frappe.get_all(
         DT,
-        filters={"sr_mobile_norm": mobile_norm},
+        filters=duplicate_filters(mobile_norm, pipeline),
         fields=_lead_fields(["sr_mobile_norm", *GROUP_STATE_FIELDS]),
         order_by="creation desc",
         limit_page_length=0,
     )
 
 
-def _set_group_status(mobile_norm: str, status: str, error: str | None = None, pending: int = 0):
+def _set_group_status(mobile_norm: str, pipeline: str | None, status: str, error: str | None = None, pending: int = 0):
     values = {
         "sr_dedupe_pending": pending,
         "sr_dedupe_status": status,
@@ -136,7 +171,7 @@ def _set_group_status(mobile_norm: str, status: str, error: str | None = None, p
     }
     if frappe.db.has_column(DT, "sr_dedupe_error"):
         values["sr_dedupe_error"] = error
-    names = frappe.get_all(DT, filters={"sr_mobile_norm": mobile_norm}, pluck="name", limit_page_length=0)
+    names = frappe.get_all(DT, filters=duplicate_filters(mobile_norm, pipeline), pluck="name", limit_page_length=0)
     if names:
         frappe.db.bulk_update(DT, {name: values for name in names}, update_modified=False)
 
@@ -192,32 +227,32 @@ def _merge_duplicate(master: str, duplicate: str, mobile_norm: str):
     return True
 
 
-def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int) -> int:
+def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int, pipeline: str | None = None) -> int:
     blocked = _blocked_mobiles()
     if not is_valid_auto_merge_mobile(mobile_norm, blocked):
-        _set_group_status(mobile_norm, "Skipped", "Unsafe or invalid mobile number")
+        _set_group_status(mobile_norm, pipeline, "Skipped", "Unsafe or invalid mobile number")
         _write_merge_log(mobile_norm, None, None, "Skipped", "Unsafe or invalid mobile number")
         frappe.db.commit()
         return 0
 
-    lock_name = f"{MOBILE_LOCK_PREFIX}{mobile_norm}"
+    lock_name = f"{MOBILE_LOCK_PREFIX}{mobile_norm}_{pipeline or ''}"
     with filelock(lock_name, timeout=0):
-        rows = _group_rows(mobile_norm)
+        rows = _group_rows(mobile_norm, pipeline)
         if len(rows) <= 1:
-            _set_group_status(mobile_norm, "Master")
+            _set_group_status(mobile_norm, pipeline, "Master")
             frappe.db.commit()
             return 0
 
         if len(rows) > max_group_size:
             message = f"Group size {len(rows)} exceeds limit {max_group_size}"
-            _set_group_status(mobile_norm, "Skipped", message)
+            _set_group_status(mobile_norm, pipeline, "Skipped", message)
             _write_merge_log(mobile_norm, None, None, "Skipped", message)
             frappe.db.commit()
             return 0
 
         primary = select_primary_row(rows)
         if not primary:
-            _set_group_status(mobile_norm, "Skipped", "No primary could be selected")
+            _set_group_status(mobile_norm, pipeline, "Skipped", "No primary could be selected")
             frappe.db.commit()
             return 0
 
@@ -258,8 +293,8 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int)
                 frappe.flags.crm_lead_dedupe_scheduler = False
 
         try:
-            sync_duplicate_group(mobile_norm)
-            _set_group_status(mobile_norm, "Master")
+            sync_duplicate_group(mobile_norm, pipeline)
+            _set_group_status(mobile_norm, pipeline, "Master")
             frappe.db.commit()
         except Exception:
             frappe.db.rollback()
@@ -290,17 +325,19 @@ def run_auto_merge_scheduler():
             merged = 0
 
             log_operation("auto_merge_scheduler.start", group_count=len(mobile_groups), max_merges=max_merges)
-            for mobile_norm in mobile_groups:
+            for group in mobile_groups:
                 if merged >= max_merges:
                     break
+                mobile_norm = group.sr_mobile_norm
+                pipeline = group.get("sr_lead_pipeline")
                 try:
-                    merged += process_mobile_group(mobile_norm, max_merges - merged, max_group_size)
+                    merged += process_mobile_group(mobile_norm, max_merges - merged, max_group_size, pipeline)
                     processed_groups += 1
                 except LockTimeoutError:
                     log_operation("auto_merge_scheduler.group_locked", mobile_norm=mobile_norm)
                 except Exception:
                     frappe.db.rollback()
-                    _set_group_status(mobile_norm, "Failed", frappe.get_traceback()[:1000])
+                    _set_group_status(mobile_norm, pipeline, "Failed", frappe.get_traceback()[:1000])
                     frappe.db.commit()
                     frappe.log_error(frappe.get_traceback(), "CRM Lead Auto Merge Group Failed")
 

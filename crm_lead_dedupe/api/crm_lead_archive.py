@@ -1,7 +1,7 @@
 import frappe
 from crm_lead_dedupe.logging import log_operation
 from crm_lead_dedupe.settings import is_enabled
-from crm_lead_dedupe.leads.dup_utils import norm_mobile, sync_duplicate_group
+from crm_lead_dedupe.leads.dup_utils import norm_mobile, pipeline_scope_enabled, sync_duplicate_group
 from crm_lead_dedupe.leads.perm import require_dedupe_manager
 
 @frappe.whitelist()
@@ -11,7 +11,7 @@ def backfill_archive_mobile_pipeline_groups():
         log_operation("backfill_archive_groups.skipped", reason="archive_disabled")
         return {"groups": 0, "skipped": "archive_disabled"}
     log_operation("backfill_archive_groups.start")
-    pipeline_column = "sr_lead_pipeline" if frappe.db.has_column("CRM Lead", "sr_lead_pipeline") else "''"
+    pipeline_column = "sr_lead_pipeline" if pipeline_scope_enabled() else "''"
     groups = frappe.db.sql(
         f"""
         select sr_mobile_norm, {pipeline_column} as sr_lead_pipeline

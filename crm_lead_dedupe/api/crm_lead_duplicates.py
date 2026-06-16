@@ -6,6 +6,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_THRESHOLD,
     find_dup_candidates,
     norm_mobile,
+    pipeline_scope_enabled,
     score_duplicate,
 )
 from crm_lead_dedupe.leads.perm import (
@@ -216,6 +217,7 @@ def get_hit_counts_for_crm_leads(lead_names):
     rows_by_name = {row.name: row for row in rows}
     visible_rows = [rows_by_name[name] for name in names if name in rows_by_name]
 
+    scoped_by_pipeline = pipeline_scope_enabled()
     mobile_norms = {
         row.sr_mobile_norm or norm_mobile(row.mobile_no)
         for row in visible_rows
@@ -225,23 +227,32 @@ def get_hit_counts_for_crm_leads(lead_names):
         log_operation("get_hit_counts.done", lead_count=len(names), mobile_group_count=0, candidate_count=0)
         return {"success": True, "result": result}
 
+    fields = ["sr_mobile_norm", "count(name) as hit_count"]
+    group_by = "sr_mobile_norm"
+    if scoped_by_pipeline:
+        fields.insert(1, "sr_lead_pipeline")
+        group_by = "sr_mobile_norm, sr_lead_pipeline"
+
     candidate_counts = frappe.get_list(
         DT,
         filters={"sr_mobile_norm": ["in", list(mobile_norms)]},
-        fields=["sr_mobile_norm", "count(name) as hit_count"],
-        group_by="sr_mobile_norm",
+        fields=fields,
+        group_by=group_by,
         limit_page_length=0,
     )
-    counts_by_mobile = {row.sr_mobile_norm: cint(row.hit_count) for row in candidate_counts}
+    counts_by_key = {
+        _count_key(row.sr_mobile_norm, row.get("sr_lead_pipeline") if scoped_by_pipeline else None): cint(row.hit_count)
+        for row in candidate_counts
+    }
 
     for row in visible_rows:
         mobile_norm = row.sr_mobile_norm or norm_mobile(row.mobile_no)
 
+        key = _count_key(mobile_norm, row.get("sr_lead_pipeline") if scoped_by_pipeline else None)
         result[row.name] = {
             # score_duplicate is exact normalized-mobile equality, so the
-            # candidate count is the permission-filtered mobile group size
-            # minus the current row.
-            "hit_count": max(counts_by_mobile.get(mobile_norm, 0) - 1, 0),
+            # candidate count is the permission-filtered group size minus the current row.
+            "hit_count": max(counts_by_key.get(key, 0) - 1, 0),
             "unseen_hit": cint(row.get("sr_dup_unseen_hit")),
         }
 
@@ -286,6 +297,10 @@ def _as_list(value):
     if not isinstance(value, list):
         return []
     return [item.get("name") if isinstance(item, dict) else item for item in value if item]
+
+
+def _count_key(mobile_norm: str, pipeline: str | None = None):
+    return (mobile_norm, pipeline or "")
 
 
 def _count_fields():

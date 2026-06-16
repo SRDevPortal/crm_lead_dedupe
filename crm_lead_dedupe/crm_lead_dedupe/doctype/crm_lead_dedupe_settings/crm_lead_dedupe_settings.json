@@ -15,6 +15,8 @@
     "crm_lead_dedupe_scheduler_enabled",
     "crm_lead_dedupe_hit_count_enabled",
     "crm_lead_dedupe_permission_filter_enabled",
+    "crm_lead_dedupe_match_by_pipeline_enabled",
+    "crm_lead_dedupe_newest_primary_enabled",
     "section_scheduler",
     "crm_lead_dedupe_max_pending_leads",
     "crm_lead_dedupe_max_mobile_groups",
@@ -96,6 +98,20 @@
       "fieldname": "crm_lead_dedupe_permission_filter_enabled",
       "fieldtype": "Check",
       "label": "Enable Permission Filter"
+    },
+    {
+      "default": "0",
+      "description": "When enabled, CRM Leads are treated as duplicates only when both mobile number and pipeline match.",
+      "fieldname": "crm_lead_dedupe_match_by_pipeline_enabled",
+      "fieldtype": "Check",
+      "label": "Match Duplicates By Pipeline"
+    },
+    {
+      "default": "0",
+      "description": "When enabled, the newest active CRM Lead becomes the primary record during sync and merge, so repeat callers come up in recent lists.",
+      "fieldname": "crm_lead_dedupe_newest_primary_enabled",
+      "fieldtype": "Check",
+      "label": "Use Newest Lead As Primary"
     },
     {
       "fieldname": "section_scheduler",

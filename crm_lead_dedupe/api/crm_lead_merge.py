@@ -8,6 +8,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     LEGACY_DUPLICATE_OF_FIELD,
     DUPLICATE_THRESHOLD,
     norm_mobile,
+    pipeline_scope_enabled,
     score_duplicate,
     sync_duplicate_group,
 )
@@ -52,6 +53,10 @@ def _validate_duplicate(primary_row, duplicate_row):
     if primary_row.sr_mobile_norm != duplicate_row.sr_mobile_norm:
         frappe.throw(
             _("Lead {0} does not share the primary mobile number.").format(duplicate_row.name)
+        )
+    if pipeline_scope_enabled() and primary_row.get("sr_lead_pipeline") != duplicate_row.get("sr_lead_pipeline"):
+        frappe.throw(
+            _("Lead {0} is in a different pipeline and cannot be merged with this primary.").format(duplicate_row.name)
         )
 
     score = score_duplicate(primary_row, duplicate_row)

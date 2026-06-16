@@ -2,16 +2,14 @@ import frappe
 from frappe import _
 from crm_lead_dedupe.logging import log_operation
 from crm_lead_dedupe.settings import is_enabled
-from crm_lead_dedupe.leads.dup_utils import DUPLICATE_OF_FIELD, LEGACY_DUPLICATE_OF_FIELD
+from crm_lead_dedupe.leads.dup_utils import DUPLICATE_OF_FIELD, LEGACY_DUPLICATE_OF_FIELD, duplicate_filters
 from crm_lead_dedupe.leads.perm import can_manage_dedupe
 
 def _is_newest(name: str) -> bool:
     d = frappe.get_doc("CRM Lead", name)
     if not d.get("sr_mobile_norm"):
         return False
-    filters = {"sr_mobile_norm": d.sr_mobile_norm}
-    if d.get("sr_lead_pipeline") and frappe.db.has_column("CRM Lead", "sr_lead_pipeline"):
-        filters["sr_lead_pipeline"] = d.get("sr_lead_pipeline")
+    filters = duplicate_filters(d.sr_mobile_norm, d.get("sr_lead_pipeline"))
     newest = frappe.db.get_value(
         "CRM Lead",
         filters,

@@ -9,6 +9,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
     norm_mobile,
+    pipeline_scope_enabled,
     sync_duplicate_group,
 )
 
@@ -287,7 +288,7 @@ def backfill_mobile_norm():
     if not frappe.db.has_column(DT, "mobile_no") or not frappe.db.has_column(DT, "sr_mobile_norm"):
         return
 
-    has_pipeline = frappe.db.has_column(DT, "sr_lead_pipeline")
+    has_pipeline = pipeline_scope_enabled()
     pipeline_select = ", sr_lead_pipeline" if has_pipeline else ""
     rows = frappe.db.sql(
         f"""
@@ -525,19 +526,34 @@ def sync_duplicate_groups_batched(
 
     batch_size = max(1, int(batch_size or 500))
     last_mobile_norm = _get_progress("groups_last_mobile_norm")
-    rows = frappe.db.sql(
-        f"""
-        select sr_mobile_norm
-        from `tab{DT}`
-        where ifnull(sr_mobile_norm, '') != ''
-            and sr_mobile_norm > %(last_mobile_norm)s
-        group by sr_mobile_norm
-        order by sr_mobile_norm asc
-        limit %(batch_size)s
-        """,
-        {"last_mobile_norm": last_mobile_norm, "batch_size": batch_size},
-        as_dict=True,
-    )
+    if pipeline_scope_enabled():
+        rows = frappe.db.sql(
+            f"""
+            select sr_mobile_norm, sr_lead_pipeline
+            from `tab{DT}`
+            where ifnull(sr_mobile_norm, '') != ''
+                and sr_mobile_norm > %(last_mobile_norm)s
+            group by sr_mobile_norm, sr_lead_pipeline
+            order by sr_mobile_norm asc
+            limit %(batch_size)s
+            """,
+            {"last_mobile_norm": last_mobile_norm, "batch_size": batch_size},
+            as_dict=True,
+        )
+    else:
+        rows = frappe.db.sql(
+            f"""
+            select sr_mobile_norm, null as sr_lead_pipeline
+            from `tab{DT}`
+            where ifnull(sr_mobile_norm, '') != ''
+                and sr_mobile_norm > %(last_mobile_norm)s
+            group by sr_mobile_norm
+            order by sr_mobile_norm asc
+            limit %(batch_size)s
+            """,
+            {"last_mobile_norm": last_mobile_norm, "batch_size": batch_size},
+            as_dict=True,
+        )
 
     if not rows:
         _set_progress("groups_done", "1")
@@ -548,7 +564,7 @@ def sync_duplicate_groups_batched(
 
     mobile_norms = [row.sr_mobile_norm for row in rows]
     for row in rows:
-        sync_duplicate_group(row.sr_mobile_norm)
+        sync_duplicate_group(row.sr_mobile_norm, row.get("sr_lead_pipeline"))
 
     last_mobile_norm = rows[-1].sr_mobile_norm
     done = len(rows) < batch_size

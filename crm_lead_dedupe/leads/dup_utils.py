@@ -2,7 +2,7 @@ import re
 import frappe
 from frappe.utils import cint, now_datetime
 from crm_lead_dedupe.logging import log_operation
-from crm_lead_dedupe.settings import is_enabled
+from crm_lead_dedupe.settings import get_setting, is_enabled
 
 
 DT = "CRM Lead"
@@ -61,6 +61,14 @@ def _has_column(fieldname: str) -> bool:
         return False
 
 
+def pipeline_scope_enabled() -> bool:
+    return bool(get_setting("crm_lead_dedupe_match_by_pipeline_enabled")) and _has_column("sr_lead_pipeline")
+
+
+def newest_primary_enabled() -> bool:
+    return bool(get_setting("crm_lead_dedupe_newest_primary_enabled"))
+
+
 def _lead_fields(extra: list[str] | None = None) -> list[str]:
     fields = ["name", "lead_name", "mobile_no", "status", "creation"]
     for fieldname in OPTIONAL_CANDIDATE_FIELDS:
@@ -73,9 +81,10 @@ def _lead_fields(extra: list[str] | None = None) -> list[str]:
 
 
 def duplicate_filters(mobile_norm: str, pipeline: str | None = None) -> dict:
-    # Mobile number is the single duplicate key. Pipeline is accepted only for
-    # backward-compatible callers and is intentionally ignored.
-    return {"sr_mobile_norm": mobile_norm}
+    filters = {"sr_mobile_norm": mobile_norm}
+    if pipeline_scope_enabled():
+        filters["sr_lead_pipeline"] = pipeline or ["in", ["", None]]
+    return filters
 
 
 def find_dup_candidates(
@@ -145,15 +154,19 @@ def has_working_assignment(row) -> bool:
 def select_primary_row(rows):
     """
     Primary selection rules:
-    1. Active assigned working lead wins. If many exist, keep the oldest one.
-    2. If no active assigned lead exists, newest active lead wins.
-    3. Converted/archived rows do not win while any active row exists.
-    4. If every row is inactive, fall back to newest row for linkage only.
+    1. When newest-primary is enabled, newest active lead wins.
+    2. Otherwise, active assigned working lead wins. If many exist, keep the oldest one.
+    3. If no active assigned lead exists, newest active lead wins.
+    4. Converted/archived rows do not win while any active row exists.
+    5. If every row is inactive, fall back to newest row for linkage only.
     """
     if not rows:
         return None
 
     active_rows = [row for row in rows if is_active_lead_row(row)]
+    if newest_primary_enabled() and active_rows:
+        return active_rows[0]
+
     assigned_rows = [row for row in active_rows if has_working_assignment(row)]
     if assigned_rows:
         return sorted(assigned_rows, key=lambda row: _value(row, "creation") or "")[0]
