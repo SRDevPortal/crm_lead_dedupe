@@ -9,6 +9,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     is_duplicate_match,
     is_valid_auto_merge_mobile,
     norm_mobile,
+    select_owner_source_row,
     select_primary_row,
     score_duplicate,
     duplicate_filters,
@@ -117,6 +118,16 @@ class TestDupUtils(TestCase):
 
         with patch("crm_lead_dedupe.leads.dup_utils.get_setting", return_value=1):
             self.assertEqual(select_primary_row(rows).name, "NEW-AGENT-2")
+
+    def test_owner_source_remains_oldest_active_assigned_lead(self):
+        rows = [
+            lead(name="NEW-AGENT-2", creation="2026-05-21 10:00:00", lead_owner="agent2@example.com"),
+            lead(name="OLD-AGENT-1", creation="2026-05-20 10:00:00", lead_owner="agent1@example.com"),
+        ]
+
+        with patch("crm_lead_dedupe.leads.dup_utils.get_setting", return_value=1):
+            self.assertEqual(select_primary_row(rows).name, "NEW-AGENT-2")
+        self.assertEqual(select_owner_source_row(rows).name, "OLD-AGENT-1")
 
     def test_pipeline_scope_adds_pipeline_to_duplicate_filters_when_enabled(self):
         with (

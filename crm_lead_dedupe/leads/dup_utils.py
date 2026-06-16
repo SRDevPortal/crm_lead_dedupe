@@ -175,6 +175,20 @@ def select_primary_row(rows):
     return rows[0]
 
 
+def select_owner_source_row(rows):
+    """Return the working lead whose owner/assignment should survive a merge."""
+    if not rows:
+        return None
+
+    active_rows = [row for row in rows if is_active_lead_row(row)]
+    assigned_rows = [row for row in active_rows if has_working_assignment(row)]
+    if assigned_rows:
+        return sorted(assigned_rows, key=lambda row: _value(row, "creation") or "")[0]
+    if active_rows:
+        return active_rows[0]
+    return rows[0]
+
+
 def get_primary_lead_name_for_mobile(mobile_norm: str, pipeline: str | None = None) -> str | None:
     """Return the active primary CRM Lead name for a normalized mobile group."""
     if not mobile_norm:

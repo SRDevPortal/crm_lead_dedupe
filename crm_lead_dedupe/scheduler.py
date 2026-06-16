@@ -14,6 +14,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     duplicate_filters,
     is_valid_auto_merge_mobile,
     pipeline_scope_enabled,
+    select_owner_source_row,
     select_primary_row,
     sync_duplicate_group,
 )
@@ -202,6 +203,35 @@ def _write_merge_log(mobile_norm: str, master: str | None, duplicate: str | None
         frappe.log_error(frappe.get_traceback(), "CRM Lead Auto Merge Log Failed")
 
 
+def _owner_values_from_row(row) -> dict:
+    values = {}
+    if not row:
+        return values
+
+    if frappe.db.has_column(DT, "lead_owner"):
+        values["lead_owner"] = row.get("lead_owner")
+
+    assigned = row.get("_assign")
+    if assigned:
+        if isinstance(assigned, list):
+            values["_assign"] = frappe.as_json(assigned)
+        else:
+            values["_assign"] = assigned
+    elif row.get("lead_owner"):
+        values["_assign"] = frappe.as_json([row.get("lead_owner")])
+    else:
+        values["_assign"] = "[]"
+
+    return values
+
+
+def _restore_owner_values(master: str, values: dict):
+    if not values or not frappe.db.exists(DT, master):
+        return
+
+    frappe.db.set_value(DT, master, values, update_modified=False)
+
+
 def _merge_duplicate(master: str, duplicate: str, mobile_norm: str):
     if not frappe.db.exists(DT, master) or not frappe.db.exists(DT, duplicate):
         _write_merge_log(mobile_norm, master, duplicate, "Skipped", "Master or duplicate no longer exists")
@@ -257,6 +287,7 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
             return 0
 
         master = primary.name
+        owner_values = _owner_values_from_row(select_owner_source_row(rows))
         merged = 0
         for row in rows:
             if row.name == master:
@@ -293,7 +324,9 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
                 frappe.flags.crm_lead_dedupe_scheduler = False
 
         try:
+            _restore_owner_values(master, owner_values)
             sync_duplicate_group(mobile_norm, pipeline)
+            _restore_owner_values(master, owner_values)
             _set_group_status(mobile_norm, pipeline, "Master")
             frappe.db.commit()
         except Exception:
