@@ -7,7 +7,9 @@ from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
     DUPLICATE_THRESHOLD,
+    is_merge_status_allowed,
     norm_mobile,
+    oldest_primary_enabled,
     pipeline_scope_enabled,
     score_duplicate,
     sync_duplicate_group,
@@ -37,6 +39,10 @@ def _lead_row(name: str) -> frappe._dict:
         "lead_name",
         "status",
         "source",
+        "creation",
+        "lead_owner",
+        "_assign",
+        "converted",
         "sr_is_archived",
     ]
     existing_fields = [field for field in fields if field == "name" or frappe.db.has_column("CRM Lead", field)]
@@ -48,6 +54,12 @@ def _lead_row(name: str) -> frappe._dict:
 
 
 def _validate_duplicate(primary_row, duplicate_row):
+    if not is_merge_status_allowed(primary_row):
+        frappe.throw(_("Primary lead status is not eligible for merge."))
+    if not is_merge_status_allowed(duplicate_row):
+        frappe.throw(
+            _("Lead {0} status is not eligible for merge.").format(duplicate_row.name)
+        )
     if not primary_row.sr_mobile_norm:
         frappe.throw(_("Primary lead has no normalized mobile number."))
     if primary_row.sr_mobile_norm != duplicate_row.sr_mobile_norm:
@@ -63,6 +75,37 @@ def _validate_duplicate(primary_row, duplicate_row):
     if score < DUPLICATE_THRESHOLD:
         frappe.throw(
             _("Lead {0} is below the duplicate confidence threshold.").format(duplicate_row.name)
+        )
+
+
+def _owner_values_from_row(row) -> dict:
+    values = {}
+    if not row:
+        return values
+
+    if frappe.db.has_column("CRM Lead", "lead_owner"):
+        values["lead_owner"] = row.get("lead_owner")
+    if frappe.db.has_column("CRM Lead", "_assign"):
+        values["_assign"] = row.get("_assign") or (
+            frappe.as_json([row.get("lead_owner")]) if row.get("lead_owner") else "[]"
+        )
+    return values
+
+
+def _restore_owner_values(name: str, values: dict):
+    if values and frappe.db.exists("CRM Lead", name):
+        frappe.db.set_value("CRM Lead", name, values, update_modified=False)
+
+
+def _refresh_primary_creation_from_rows(primary: str, rows):
+    if not oldest_primary_enabled() or not rows:
+        return
+
+    newest = sorted(rows, key=lambda row: row.get("creation") or "", reverse=True)[0]
+    if newest.get("creation"):
+        frappe.db.sql(
+            "update `tabCRM Lead` set creation=%s where name=%s",
+            (newest.creation, primary),
         )
 
 @frappe.whitelist()
@@ -82,12 +125,15 @@ def merge_crm_leads(primary: str, duplicates):
         frappe.throw(_("Primary lead is archived. Choose the active lead as primary."))
 
     allowed_duplicates = []
+    merge_rows = [primary_row]
+    owner_values = _owner_values_from_row(primary_row)
     for d in duplicates:
         if d == primary:
             continue
         duplicate_row = _lead_row(d)
         _validate_duplicate(primary_row, duplicate_row)
         allowed_duplicates.append(d)
+        merge_rows.append(duplicate_row)
 
     if not allowed_duplicates:
         frappe.throw("No valid duplicates provided.")
@@ -108,8 +154,12 @@ def merge_crm_leads(primary: str, duplicates):
     if frappe.db.has_column("CRM Lead", LEGACY_DUPLICATE_OF_FIELD):
         values[LEGACY_DUPLICATE_OF_FIELD] = None
     frappe.db.set_value("CRM Lead", primary, values, update_modified=False)
+    _restore_owner_values(primary, owner_values)
+    _refresh_primary_creation_from_rows(primary, merge_rows)
 
     sync_duplicate_group(primary_row.sr_mobile_norm, primary_row.get("sr_lead_pipeline"))
+    _restore_owner_values(primary, owner_values)
+    _refresh_primary_creation_from_rows(primary, merge_rows)
 
     frappe.db.commit()
     log_operation("merge_crm_leads.done", primary=primary, merged_count=len(allowed_duplicates), merged=allowed_duplicates)

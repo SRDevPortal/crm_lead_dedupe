@@ -69,6 +69,50 @@ def newest_primary_enabled() -> bool:
     return bool(get_setting("crm_lead_dedupe_newest_primary_enabled"))
 
 
+def oldest_primary_enabled() -> bool:
+    return bool(get_setting("crm_lead_dedupe_oldest_primary_enabled"))
+
+
+def merge_statuses() -> set[str]:
+    try:
+        if frappe.db.exists("DocType", "CRM Lead Dedupe Merge Status"):
+            rows = frappe.get_all(
+                "CRM Lead Dedupe Merge Status",
+                filters={
+                    "parent": "CRM Lead Dedupe Settings",
+                    "parenttype": "CRM Lead Dedupe Settings",
+                    "parentfield": "crm_lead_dedupe_merge_statuses",
+                },
+                pluck="crm_lead_status",
+                order_by="idx asc",
+            )
+            return {str(status).strip() for status in rows if str(status).strip()}
+    except Exception:
+        pass
+
+    value = get_setting("crm_lead_dedupe_merge_statuses") or ""
+    if isinstance(value, list) and value and hasattr(value[0], "get"):
+        return {
+            str(row.get("crm_lead_status") or row.get("status") or "").strip()
+            for row in value
+            if str(row.get("crm_lead_status") or row.get("status") or "").strip()
+        }
+    if isinstance(value, str):
+        parts = re.split(r"[\n,]+", value)
+    elif isinstance(value, (list, tuple, set)):
+        parts = value
+    else:
+        parts = []
+    return {str(status).strip() for status in parts if str(status).strip()}
+
+
+def is_merge_status_allowed(row) -> bool:
+    statuses = merge_statuses()
+    if not statuses:
+        return True
+    return (_value(row, "status") or "").strip() in statuses
+
+
 def _lead_fields(extra: list[str] | None = None) -> list[str]:
     fields = ["name", "lead_name", "mobile_no", "status", "creation"]
     for fieldname in OPTIONAL_CANDIDATE_FIELDS:
@@ -163,7 +207,10 @@ def select_primary_row(rows):
     if not rows:
         return None
 
-    active_rows = [row for row in rows if is_active_lead_row(row)]
+    eligible_rows = [row for row in rows if is_merge_status_allowed(row)]
+    active_rows = [row for row in eligible_rows if is_active_lead_row(row)]
+    if oldest_primary_enabled() and active_rows:
+        return sorted(active_rows, key=lambda row: _value(row, "creation") or "")[0]
     if newest_primary_enabled() and active_rows:
         return active_rows[0]
 
@@ -172,7 +219,7 @@ def select_primary_row(rows):
         return sorted(assigned_rows, key=lambda row: _value(row, "creation") or "")[0]
     if active_rows:
         return active_rows[0]
-    return rows[0]
+    return eligible_rows[0] if eligible_rows else None
 
 
 def select_owner_source_row(rows):
@@ -180,13 +227,17 @@ def select_owner_source_row(rows):
     if not rows:
         return None
 
-    active_rows = [row for row in rows if is_active_lead_row(row)]
+    eligible_rows = [row for row in rows if is_merge_status_allowed(row)]
+    active_rows = [row for row in eligible_rows if is_active_lead_row(row)]
+    if oldest_primary_enabled() and active_rows:
+        return sorted(active_rows, key=lambda row: _value(row, "creation") or "")[0]
+
     assigned_rows = [row for row in active_rows if has_working_assignment(row)]
     if assigned_rows:
         return sorted(assigned_rows, key=lambda row: _value(row, "creation") or "")[0]
     if active_rows:
         return active_rows[0]
-    return rows[0]
+    return eligible_rows[0] if eligible_rows else None
 
 
 def get_primary_lead_name_for_mobile(mobile_norm: str, pipeline: str | None = None) -> str | None:
@@ -283,16 +334,66 @@ def sync_duplicate_group(
     updates = {}
     relink_to_primary = []
 
-    primary = select_primary_row(rows)
-    primary_name = primary["name"]
-    primary_is_active = is_active_lead_row(primary)
     has_unseen_flag = _has_column("sr_dup_unseen_hit")
     has_unseen_on = _has_column("sr_dup_unseen_hit_on")
+    primary = select_primary_row(rows)
+    if not primary:
+        updates = {}
+        for row in rows:
+            values = {
+                "sr_is_duplicate": 0,
+                **_duplicate_link_values(),
+                "sr_duplicate_score": 0,
+            }
+            if archive_enabled:
+                values["sr_is_archived"] = 0
+            if hit_count_enabled:
+                values.update({
+                    "sr_dup_hit_count": 0,
+                    "sr_dup_candidates_json": None,
+                })
+            if hit_count_enabled and has_unseen_flag:
+                values["sr_dup_unseen_hit"] = 0
+                if has_unseen_on:
+                    values["sr_dup_unseen_hit_on"] = None
+            updates[row["name"]] = values
+
+        _bulk_update(updates)
+        log_operation(
+            "sync_duplicate_group.no_eligible_rows",
+            mobile_norm=mobile_norm,
+            pipeline=pipeline,
+            row_count=len(rows),
+        )
+        return
+
+    primary_name = primary["name"]
+    primary_is_active = is_active_lead_row(primary)
 
     for row in rows:
+        if not is_merge_status_allowed(row):
+            values = {
+                "sr_is_duplicate": 0,
+                **_duplicate_link_values(),
+                "sr_duplicate_score": 0,
+            }
+            if archive_enabled:
+                values["sr_is_archived"] = 0
+            if hit_count_enabled:
+                values.update({
+                    "sr_dup_hit_count": 0,
+                    "sr_dup_candidates_json": None,
+                })
+            if hit_count_enabled and has_unseen_flag:
+                values["sr_dup_unseen_hit"] = 0
+                if has_unseen_on:
+                    values["sr_dup_unseen_hit_on"] = None
+            updates[row["name"]] = values
+            continue
+
         candidates = [
             r for r in rows
-            if r["name"] != row["name"] and is_duplicate_match(row, r)
+            if r["name"] != row["name"] and is_merge_status_allowed(r) and is_duplicate_match(row, r)
         ]
         values = {}
         if hit_count_enabled:

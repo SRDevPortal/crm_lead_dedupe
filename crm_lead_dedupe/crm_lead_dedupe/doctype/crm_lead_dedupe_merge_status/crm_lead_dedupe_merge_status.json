@@ -1,0 +1,31 @@
+{
+  "actions": [],
+  "creation": "2026-06-18 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "crm_lead_status"
+  ],
+  "fields": [
+    {
+      "fieldname": "crm_lead_status",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "label": "CRM Lead Status",
+      "options": "CRM Lead Status",
+      "reqd": 1
+    }
+  ],
+  "istable": 1,
+  "links": [],
+  "modified": "2026-06-18 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "CRM Lead Dedupe",
+  "name": "CRM Lead Dedupe Merge Status",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": []
+}

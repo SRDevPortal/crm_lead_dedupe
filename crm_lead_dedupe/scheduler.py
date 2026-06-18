@@ -12,7 +12,9 @@ from crm_lead_dedupe.leads.dup_utils import (
     LEGACY_DUPLICATE_OF_FIELD,
     _lead_fields,
     duplicate_filters,
+    is_merge_status_allowed,
     is_valid_auto_merge_mobile,
+    oldest_primary_enabled,
     pipeline_scope_enabled,
     select_owner_source_row,
     select_primary_row,
@@ -232,6 +234,20 @@ def _restore_owner_values(master: str, values: dict):
     frappe.db.set_value(DT, master, values, update_modified=False)
 
 
+def _refresh_master_creation_from_newest(master: str, rows):
+    if not oldest_primary_enabled() or not rows or not frappe.db.exists(DT, master):
+        return
+
+    newest_creation = rows[0].get("creation")
+    if not newest_creation:
+        return
+
+    frappe.db.sql(
+        f"update `tab{DT}` set creation=%s where name=%s",
+        (newest_creation, master),
+    )
+
+
 def _merge_duplicate(master: str, duplicate: str, mobile_norm: str):
     if not frappe.db.exists(DT, master) or not frappe.db.exists(DT, duplicate):
         _write_merge_log(mobile_norm, master, duplicate, "Skipped", "Master or duplicate no longer exists")
@@ -268,28 +284,30 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
     lock_name = f"{MOBILE_LOCK_PREFIX}{mobile_norm}_{pipeline or ''}"
     with filelock(lock_name, timeout=0):
         rows = _group_rows(mobile_norm, pipeline)
-        if len(rows) <= 1:
+        eligible_rows = [row for row in rows if is_merge_status_allowed(row)]
+        if len(eligible_rows) <= 1:
+            sync_duplicate_group(mobile_norm, pipeline)
             _set_group_status(mobile_norm, pipeline, "Master")
             frappe.db.commit()
             return 0
 
-        if len(rows) > max_group_size:
-            message = f"Group size {len(rows)} exceeds limit {max_group_size}"
+        if len(eligible_rows) > max_group_size:
+            message = f"Group size {len(eligible_rows)} exceeds limit {max_group_size}"
             _set_group_status(mobile_norm, pipeline, "Skipped", message)
             _write_merge_log(mobile_norm, None, None, "Skipped", message)
             frappe.db.commit()
             return 0
 
-        primary = select_primary_row(rows)
+        primary = select_primary_row(eligible_rows)
         if not primary:
             _set_group_status(mobile_norm, pipeline, "Skipped", "No primary could be selected")
             frappe.db.commit()
             return 0
 
         master = primary.name
-        owner_values = _owner_values_from_row(select_owner_source_row(rows))
+        owner_values = _owner_values_from_row(select_owner_source_row(eligible_rows))
         merged = 0
-        for row in rows:
+        for row in eligible_rows:
             if row.name == master:
                 continue
             if merged >= max_merges:
@@ -325,8 +343,10 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
 
         try:
             _restore_owner_values(master, owner_values)
+            _refresh_master_creation_from_newest(master, eligible_rows)
             sync_duplicate_group(mobile_norm, pipeline)
             _restore_owner_values(master, owner_values)
+            _refresh_master_creation_from_newest(master, eligible_rows)
             _set_group_status(mobile_norm, pipeline, "Master")
             frappe.db.commit()
         except Exception:

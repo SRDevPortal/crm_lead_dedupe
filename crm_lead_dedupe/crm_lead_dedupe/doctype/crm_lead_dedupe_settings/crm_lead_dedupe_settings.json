@@ -17,6 +17,8 @@
     "crm_lead_dedupe_permission_filter_enabled",
     "crm_lead_dedupe_match_by_pipeline_enabled",
     "crm_lead_dedupe_newest_primary_enabled",
+    "crm_lead_dedupe_oldest_primary_enabled",
+    "crm_lead_dedupe_merge_statuses",
     "section_scheduler",
     "crm_lead_dedupe_max_pending_leads",
     "crm_lead_dedupe_max_mobile_groups",
@@ -112,6 +114,20 @@
       "fieldname": "crm_lead_dedupe_newest_primary_enabled",
       "fieldtype": "Check",
       "label": "Use Newest Lead As Primary"
+    },
+    {
+      "default": "0",
+      "description": "When enabled, the oldest eligible active CRM Lead becomes the primary record during sync and merge. The primary creation time is refreshed from the newest merged lead.",
+      "fieldname": "crm_lead_dedupe_oldest_primary_enabled",
+      "fieldtype": "Check",
+      "label": "Use Old Lead As Primary"
+    },
+    {
+      "description": "When set, only leads in these statuses are considered for duplicate sync and merge; other statuses remain independent.",
+      "fieldname": "crm_lead_dedupe_merge_statuses",
+      "fieldtype": "Table MultiSelect",
+      "label": "Statuses Eligible For Merge",
+      "options": "CRM Lead Dedupe Merge Status"
     },
     {
       "fieldname": "section_scheduler",

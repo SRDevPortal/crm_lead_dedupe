@@ -7,7 +7,9 @@ from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_THRESHOLD,
     has_working_assignment,
     is_duplicate_match,
+    is_merge_status_allowed,
     is_valid_auto_merge_mobile,
+    merge_statuses,
     norm_mobile,
     select_owner_source_row,
     select_primary_row,
@@ -116,8 +118,37 @@ class TestDupUtils(TestCase):
             lead(name="OLD-AGENT-1", creation="2026-05-20 10:00:00", lead_owner="agent1@example.com"),
         ]
 
-        with patch("crm_lead_dedupe.leads.dup_utils.get_setting", return_value=1):
+        with patch(
+            "crm_lead_dedupe.leads.dup_utils.get_setting",
+            side_effect=lambda key: 1 if key == "crm_lead_dedupe_newest_primary_enabled" else 0,
+        ):
             self.assertEqual(select_primary_row(rows).name, "NEW-AGENT-2")
+
+    def test_oldest_primary_setting_makes_oldest_active_lead_win(self):
+        rows = [
+            lead(name="NEW-ACTIVE", creation="2026-05-21 10:00:00"),
+            lead(name="OLD-ACTIVE", creation="2026-05-20 10:00:00"),
+        ]
+
+        with patch(
+            "crm_lead_dedupe.leads.dup_utils.get_setting",
+            side_effect=lambda key: 1 if key == "crm_lead_dedupe_oldest_primary_enabled" else 0,
+        ):
+            self.assertEqual(select_primary_row(rows).name, "OLD-ACTIVE")
+
+    def test_oldest_primary_overrides_newest_primary_if_both_are_enabled(self):
+        rows = [
+            lead(name="NEW-ACTIVE", creation="2026-05-21 10:00:00"),
+            lead(name="OLD-ACTIVE", creation="2026-05-20 10:00:00"),
+        ]
+
+        with patch(
+            "crm_lead_dedupe.leads.dup_utils.get_setting",
+            side_effect=lambda key: 1
+            if key in {"crm_lead_dedupe_oldest_primary_enabled", "crm_lead_dedupe_newest_primary_enabled"}
+            else 0,
+        ):
+            self.assertEqual(select_primary_row(rows).name, "OLD-ACTIVE")
 
     def test_owner_source_remains_oldest_active_assigned_lead(self):
         rows = [
@@ -125,9 +156,51 @@ class TestDupUtils(TestCase):
             lead(name="OLD-AGENT-1", creation="2026-05-20 10:00:00", lead_owner="agent1@example.com"),
         ]
 
-        with patch("crm_lead_dedupe.leads.dup_utils.get_setting", return_value=1):
+        with patch(
+            "crm_lead_dedupe.leads.dup_utils.get_setting",
+            side_effect=lambda key: 1 if key == "crm_lead_dedupe_newest_primary_enabled" else 0,
+        ):
             self.assertEqual(select_primary_row(rows).name, "NEW-AGENT-2")
         self.assertEqual(select_owner_source_row(rows).name, "OLD-AGENT-1")
+
+    def test_owner_source_is_oldest_active_lead_in_oldest_primary_mode(self):
+        rows = [
+            lead(name="NEW-AGENT-2", creation="2026-05-21 10:00:00", lead_owner="agent2@example.com"),
+            lead(name="OLD-UNASSIGNED", creation="2026-05-20 10:00:00"),
+        ]
+
+        with patch(
+            "crm_lead_dedupe.leads.dup_utils.get_setting",
+            side_effect=lambda key: 1 if key == "crm_lead_dedupe_oldest_primary_enabled" else 0,
+        ):
+            self.assertEqual(select_owner_source_row(rows).name, "OLD-UNASSIGNED")
+
+    def test_merge_statuses_parse_lines_and_commas(self):
+        with (
+            patch("frappe.db.exists", return_value=False),
+            patch(
+                "crm_lead_dedupe.leads.dup_utils.get_setting",
+                return_value="Fresh\nOpen, Replied",
+            ),
+        ):
+            self.assertEqual(merge_statuses(), {"Fresh", "Open", "Replied"})
+
+    def test_merge_status_filter_excludes_unselected_status_from_primary(self):
+        rows = [
+            lead(name="NEW-CLOSED", creation="2026-05-21 10:00:00", status="Closed"),
+            lead(name="OLD-FRESH", creation="2026-05-20 10:00:00", status="Fresh"),
+        ]
+
+        with (
+            patch("frappe.db.exists", return_value=False),
+            patch(
+                "crm_lead_dedupe.leads.dup_utils.get_setting",
+                side_effect=lambda key: "Fresh" if key == "crm_lead_dedupe_merge_statuses" else 0,
+            ),
+        ):
+            self.assertEqual(select_primary_row(rows).name, "OLD-FRESH")
+            self.assertFalse(is_merge_status_allowed(rows[0]))
+            self.assertTrue(is_merge_status_allowed(rows[1]))
 
     def test_pipeline_scope_adds_pipeline_to_duplicate_filters_when_enabled(self):
         with (
