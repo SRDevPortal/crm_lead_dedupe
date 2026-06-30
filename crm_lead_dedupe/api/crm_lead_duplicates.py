@@ -1,3 +1,4 @@
+import hashlib
 import frappe
 from frappe.utils import cint
 from crm_lead_dedupe.logging import log_operation
@@ -16,6 +17,7 @@ from crm_lead_dedupe.leads.perm import (
 )
 
 DT = "CRM Lead"
+HIT_COUNT_CACHE_TTL = 30
 
 DEFAULT_MODAL_COLUMNS = (
     "name",
@@ -218,6 +220,12 @@ def get_hit_counts_for_crm_leads(lead_names):
     visible_rows = [rows_by_name[name] for name in names if name in rows_by_name]
 
     scoped_by_pipeline = pipeline_scope_enabled()
+    cache_key = _hit_counts_cache_key(names, visible_rows, scoped_by_pipeline)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        log_operation("get_hit_counts.done", lead_count=len(names), visible_count=len(visible_rows), cached=1)
+        return cached
+
     mobile_norms = {
         row.sr_mobile_norm or norm_mobile(row.mobile_no)
         for row in visible_rows
@@ -225,7 +233,9 @@ def get_hit_counts_for_crm_leads(lead_names):
     }
     if not mobile_norms:
         log_operation("get_hit_counts.done", lead_count=len(names), mobile_group_count=0, candidate_count=0)
-        return {"success": True, "result": result}
+        response = {"success": True, "result": result}
+        _cache_set(cache_key, response)
+        return response
 
     fields = ["sr_mobile_norm", "count(name) as hit_count"]
     group_by = "sr_mobile_norm"
@@ -263,7 +273,9 @@ def get_hit_counts_for_crm_leads(lead_names):
         mobile_group_count=len(mobile_norms),
         candidate_group_count=len(candidate_counts),
     )
-    return {"success": True, "result": result}
+    response = {"success": True, "result": result}
+    _cache_set(cache_key, response)
+    return response
 
 
 @frappe.whitelist()
@@ -301,6 +313,39 @@ def _as_list(value):
 
 def _count_key(mobile_norm: str, pipeline: str | None = None):
     return (mobile_norm, pipeline or "")
+
+
+def _hit_counts_cache_key(names: list[str], visible_rows: list, scoped_by_pipeline: bool) -> str:
+    payload = {
+        "user": frappe.session.user,
+        "names": names,
+        "scoped_by_pipeline": scoped_by_pipeline,
+        "rows": [
+            {
+                "name": row.name,
+                "mobile": row.sr_mobile_norm or norm_mobile(row.mobile_no),
+                "pipeline": row.get("sr_lead_pipeline") if scoped_by_pipeline else "",
+                "unseen": cint(row.get("sr_dup_unseen_hit")),
+            }
+            for row in visible_rows
+        ],
+    }
+    digest = hashlib.sha1(frappe.as_json(payload).encode()).hexdigest()
+    return f"crm_lead_dedupe:hit_counts:{digest}"
+
+
+def _cache_get(key: str):
+    try:
+        return frappe.cache().get_value(key)
+    except Exception:
+        return None
+
+
+def _cache_set(key: str, value) -> None:
+    try:
+        frappe.cache().set_value(key, value, expires_in_sec=HIT_COUNT_CACHE_TTL)
+    except Exception:
+        pass
 
 
 def _count_fields():
