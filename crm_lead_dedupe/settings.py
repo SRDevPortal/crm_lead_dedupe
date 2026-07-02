@@ -16,7 +16,7 @@ SETTING_DEFAULTS = {
     "crm_lead_dedupe_newest_primary_enabled": 0,
     "crm_lead_dedupe_oldest_primary_enabled": 0,
     "crm_lead_dedupe_merge_statuses": "",
-    "crm_lead_dedupe_console_log": 1,
+    "crm_lead_dedupe_console_log": 0,
     "crm_lead_dedupe_max_pending_leads": 2000,
     "crm_lead_dedupe_max_mobile_groups": 500,
     "crm_lead_dedupe_max_merges_per_run": 100,
