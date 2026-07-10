@@ -88,7 +88,15 @@ def ensure_settings_defaults():
 
         changed = False
         for key, value in SETTING_DEFAULTS.items():
-            exists = frappe.db.exists("Singles", {"doctype": SETTINGS_DOCTYPE, "field": key})
+            exists = frappe.db.sql(
+                """
+                select 1
+                from `tabSingles`
+                where doctype = %s and field = %s
+                limit 1
+                """,
+                (SETTINGS_DOCTYPE, key),
+            )
             if exists:
                 continue
             frappe.db.set_single_value(SETTINGS_DOCTYPE, key, value)
