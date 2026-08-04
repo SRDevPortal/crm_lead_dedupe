@@ -53,8 +53,8 @@ doc_events = {
 
 scheduler_events = {
     "cron": {
-        "*/5 * * * *": [
-            "crm_lead_dedupe.scheduler.run_auto_merge_scheduler_if_due",
+        "* * * * *": [
+            "crm_lead_dedupe.scheduler.run_delayed_dedupe_worker",
         ],
     },
 }

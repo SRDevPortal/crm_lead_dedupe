@@ -22,6 +22,11 @@ SETTING_DEFAULTS = {
     "crm_lead_dedupe_max_merges_per_run": 100,
     "crm_lead_dedupe_max_group_size": 100,
     "crm_lead_dedupe_scheduler_interval_minutes": 5,
+    "crm_lead_dedupe_delay_seconds": 30,
+    "crm_lead_dedupe_require_pipeline": 0,
+    "crm_lead_dedupe_require_source": 0,
+    "crm_lead_dedupe_metadata_wait_seconds": 300,
+    "crm_lead_dedupe_failed_retry_seconds": 300,
     "crm_lead_dedupe_blocked_mobiles": "\n".join(
         [
             "0000000000",
@@ -151,6 +156,10 @@ def as_boot_dict():
         "merge_statuses": get_setting("crm_lead_dedupe_merge_statuses"),
         "console_log": get_setting("crm_lead_dedupe_console_log"),
         "scheduler_interval_minutes": get_setting("crm_lead_dedupe_scheduler_interval_minutes"),
+        "delay_seconds": get_setting("crm_lead_dedupe_delay_seconds"),
+        "require_pipeline": get_setting("crm_lead_dedupe_require_pipeline"),
+        "require_source": get_setting("crm_lead_dedupe_require_source"),
+        "metadata_wait_seconds": get_setting("crm_lead_dedupe_metadata_wait_seconds"),
     }
 
 

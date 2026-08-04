@@ -51,32 +51,16 @@ def archive_group_for_mobile_pipeline(mobile: str | None = None, pipeline: str |
     return "ok"
 
 def archive_group_for_doc(doc, method=None):
-    """Hook target kept lightweight; scheduler performs group sync and merge."""
+    """Record observability only; the independent worker performs group sync."""
     if not is_enabled("hooks"):
         log_operation("archive_group_for_doc.skipped", lead_name=doc.name, method=method, reason="hooks_disabled")
         return
     mobile_norm = getattr(doc, "sr_mobile_norm", None) or norm_mobile(getattr(doc, "mobile_no", ""))
-    mark_unseen = bool(getattr(doc.flags, "crm_lead_dedupe_mark_unseen_hit", False))
-
-    if not mark_unseen or not mobile_norm:
-        log_operation(
-            "archive_group_for_doc.queued",
-            lead_name=doc.name,
-            method=method,
-            mobile_norm=mobile_norm,
-            mark_unseen=mark_unseen,
-        )
-        return
-
-    sync_duplicate_group(
-        mobile_norm,
-        doc.get("sr_lead_pipeline") if frappe.db.has_column("CRM Lead", "sr_lead_pipeline") else None,
-        mark_unseen_for_primary=True,
-    )
     log_operation(
-        "archive_group_for_doc.synced",
+        "archive_group_for_doc.queued",
         lead_name=doc.name,
         method=method,
         mobile_norm=mobile_norm,
-        mark_unseen=mark_unseen,
+        stage=doc.get("sr_dedupe_stage"),
+        not_before=doc.get("sr_dedupe_not_before"),
     )

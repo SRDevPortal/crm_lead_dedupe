@@ -24,6 +24,11 @@
     "crm_lead_dedupe_max_mobile_groups",
     "crm_lead_dedupe_max_merges_per_run",
     "crm_lead_dedupe_max_group_size",
+    "crm_lead_dedupe_delay_seconds",
+    "crm_lead_dedupe_require_pipeline",
+    "crm_lead_dedupe_require_source",
+    "crm_lead_dedupe_metadata_wait_seconds",
+    "crm_lead_dedupe_failed_retry_seconds",
     "crm_lead_dedupe_scheduler_interval_minutes",
     "crm_lead_dedupe_blocked_mobiles"
   ],
@@ -161,6 +166,41 @@
       "fieldname": "crm_lead_dedupe_max_group_size",
       "fieldtype": "Int",
       "label": "Max Group Size"
+    },
+    {
+      "default": "30",
+      "description": "Minimum age of a new or changed lead before the dedupe worker may process it. The standard scheduler checks once per minute.",
+      "fieldname": "crm_lead_dedupe_delay_seconds",
+      "fieldtype": "Int",
+      "label": "Dedupe Delay Seconds"
+    },
+    {
+      "default": "0",
+      "description": "Keep the lead in Waiting for Metadata until its pipeline is available.",
+      "fieldname": "crm_lead_dedupe_require_pipeline",
+      "fieldtype": "Check",
+      "label": "Require Pipeline Before Dedupe"
+    },
+    {
+      "default": "0",
+      "description": "Keep the lead in Waiting for Metadata until its source is available.",
+      "fieldname": "crm_lead_dedupe_require_source",
+      "fieldtype": "Check",
+      "label": "Require Source Before Dedupe"
+    },
+    {
+      "default": "300",
+      "description": "Mark dedupe as failed when required metadata is still missing after this many seconds.",
+      "fieldname": "crm_lead_dedupe_metadata_wait_seconds",
+      "fieldtype": "Int",
+      "label": "Maximum Metadata Wait Seconds"
+    },
+    {
+      "default": "300",
+      "description": "Minimum delay before a failed dedupe item can be retried by an operator or repair job.",
+      "fieldname": "crm_lead_dedupe_failed_retry_seconds",
+      "fieldtype": "Int",
+      "label": "Failed Dedupe Retry Seconds"
     },
     {
       "default": "5",

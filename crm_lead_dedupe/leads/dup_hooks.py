@@ -1,6 +1,9 @@
+from hashlib import sha256
+
 import frappe
+from frappe.utils import add_to_date, cint, now_datetime
 from crm_lead_dedupe.logging import log_operation
-from crm_lead_dedupe.settings import is_enabled
+from crm_lead_dedupe.settings import get_setting, is_enabled
 from .dup_utils import (
     DUPLICATE_OF_FIELD,
     LEGACY_DUPLICATE_OF_FIELD,
@@ -60,27 +63,85 @@ def _mark_pending_group(mobile_norm: str | None, pipeline: str | None = None):
     names = frappe.get_all("CRM Lead", filters=filters, pluck="name", limit_page_length=0)
     if not names:
         return
-    frappe.db.bulk_update(
-        "CRM Lead",
-        {name: {"sr_dedupe_pending": 1, "sr_dedupe_status": "Pending"} for name in names},
-        update_modified=False,
+    now = now_datetime()
+    delay = max(0, cint(get_setting("crm_lead_dedupe_delay_seconds")))
+    values = {"sr_dedupe_pending": 1, "sr_dedupe_status": "Pending"}
+    if frappe.db.has_column("CRM Lead", "sr_dedupe_stage"):
+        values.update(
+            {
+                "sr_dedupe_stage": "Pending",
+                "sr_dedupe_result": None,
+                "sr_dedupe_queued_at": now,
+                "sr_dedupe_not_before": add_to_date(now, seconds=delay),
+                "sr_dedupe_started_at": None,
+                "sr_dedupe_completed_at": None,
+            }
+        )
+    frappe.db.bulk_update("CRM Lead", {name: values for name in names}, update_modified=False)
+
+
+def _input_hash(doc) -> str:
+    payload = "|".join(
+        [
+            doc.get("sr_mobile_norm") or "",
+            doc.get("sr_lead_pipeline") or "",
+            doc.get("source") or "",
+        ]
     )
+    return sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _mark_doc_pending(doc):
+def _metadata_missing(doc) -> list[str]:
+    missing = []
+    if cint(get_setting("crm_lead_dedupe_require_pipeline")) and not doc.get("sr_lead_pipeline"):
+        missing.append("pipeline")
+    if cint(get_setting("crm_lead_dedupe_require_source")) and not doc.get("source"):
+        missing.append("source")
+    return missing
+
+
+def _mark_doc_pending(doc, *, force: bool = False):
     if not hasattr(doc, "sr_dedupe_pending"):
         return
 
+    input_hash = _input_hash(doc)
+    if not force and not doc.is_new() and doc.get("sr_dedupe_input_hash") == input_hash:
+        return
+
+    now = now_datetime()
     if is_valid_auto_merge_mobile(doc.sr_mobile_norm, DEFAULT_BLOCKED_MOBILES):
         doc.sr_dedupe_pending = 1
         if hasattr(doc, "sr_dedupe_status"):
             doc.sr_dedupe_status = "Pending"
+        if hasattr(doc, "sr_dedupe_stage"):
+            doc.sr_dedupe_stage = "Waiting for Metadata" if _metadata_missing(doc) else "Pending"
+            doc.sr_dedupe_result = None
+            doc.sr_dedupe_pipeline = doc.get("sr_lead_pipeline")
+            doc.sr_dedupe_queued_at = now
+            doc.sr_dedupe_not_before = add_to_date(
+                now,
+                seconds=max(0, cint(get_setting("crm_lead_dedupe_delay_seconds"))),
+            )
+            doc.sr_dedupe_started_at = None
+            doc.sr_dedupe_completed_at = None
+            doc.sr_dedupe_input_hash = input_hash
         if hasattr(doc, "sr_dedupe_error"):
             doc.sr_dedupe_error = None
     else:
         doc.sr_dedupe_pending = 0
         if hasattr(doc, "sr_dedupe_status"):
             doc.sr_dedupe_status = "Skipped"
+        if hasattr(doc, "sr_dedupe_stage"):
+            doc.sr_dedupe_stage = "Completed"
+            doc.sr_dedupe_result = "Skipped"
+            doc.sr_dedupe_pipeline = doc.get("sr_lead_pipeline")
+            doc.sr_dedupe_queued_at = now
+            doc.sr_dedupe_not_before = now
+            doc.sr_dedupe_started_at = now
+            doc.sr_dedupe_completed_at = now
+            doc.sr_dedupe_input_hash = input_hash
+        if hasattr(doc, "sr_dedupe_error"):
+            doc.sr_dedupe_error = None
 
 
 def _get_duplicate_of(doc) -> str:
@@ -148,8 +209,8 @@ def on_validate(doc, method=None):
 
 def on_before_save(doc, method=None):
     """
-    Keep Lead saves cheap. The 5-minute scheduler performs duplicate lookup and
-    merge by mobile group after the Lead transaction is complete.
+    Keep Lead saves cheap. The delayed worker performs duplicate lookup and
+    optional merge after the Lead transaction is complete.
     """
     if not is_enabled("hooks"):
         log_operation("lead_before_save.skipped", lead_name=doc.name, reason="hooks_disabled")
@@ -160,8 +221,12 @@ def on_before_save(doc, method=None):
     if old_key:
         _mark_pending_group(old_key[0], old_key[1])
 
-    if not getattr(frappe.flags, "crm_lead_dedupe_scheduler", False):
-        _mark_doc_pending(doc)
+    if (
+        not getattr(frappe.flags, "crm_lead_dedupe_scheduler", False)
+        and not getattr(doc.flags, "crm_lead_dedupe_state_queued", False)
+    ):
+        _mark_doc_pending(doc, force=bool(doc.is_new() or old_key))
+        doc.flags.crm_lead_dedupe_state_queued = True
 
     doc.flags.crm_lead_dedupe_mark_unseen_hit = bool(
         doc.sr_mobile_norm and (doc.is_new() or old_key)

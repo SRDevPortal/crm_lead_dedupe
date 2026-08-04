@@ -49,7 +49,14 @@ def _blocked_mobiles() -> set[str]:
 
 
 def _has_required_columns() -> bool:
-    required = ("sr_mobile_norm", "sr_dedupe_pending", "sr_dedupe_status")
+    required = (
+        "sr_mobile_norm",
+        "sr_dedupe_pending",
+        "sr_dedupe_status",
+        "sr_dedupe_stage",
+        "sr_dedupe_result",
+        "sr_dedupe_not_before",
+    )
     return all(frappe.db.has_column(DT, fieldname) for fieldname in required)
 
 
@@ -60,12 +67,14 @@ def _pending_mobile_groups(limit: int) -> list[frappe._dict]:
             select sr_mobile_norm, sr_lead_pipeline, min(modified) as oldest_modified
             from `tab{DT}`
             where sr_dedupe_pending = 1
+                and (sr_dedupe_stage = 'Pending' or (ifnull(sr_dedupe_stage, '') = '' and sr_dedupe_status = 'Pending'))
+                and (sr_dedupe_not_before is null or sr_dedupe_not_before <= %(now)s)
                 and ifnull(sr_mobile_norm, '') != ''
             group by sr_mobile_norm, sr_lead_pipeline
             order by oldest_modified asc
             limit %(limit)s
             """,
-            {"limit": limit},
+            {"limit": limit, "now": now_datetime()},
             as_dict=True,
         )
         return rows
@@ -75,11 +84,13 @@ def _pending_mobile_groups(limit: int) -> list[frappe._dict]:
         select distinct sr_mobile_norm, null as sr_lead_pipeline
         from `tab{DT}`
         where sr_dedupe_pending = 1
+            and (sr_dedupe_stage = 'Pending' or (ifnull(sr_dedupe_stage, '') = '' and sr_dedupe_status = 'Pending'))
+            and (sr_dedupe_not_before is null or sr_dedupe_not_before <= %(now)s)
             and ifnull(sr_mobile_norm, '') != ''
         order by modified asc
         limit %(limit)s
         """,
-        {"limit": limit},
+        {"limit": limit, "now": now_datetime()},
         as_dict=True,
     )
     return rows
@@ -174,9 +185,107 @@ def _set_group_status(mobile_norm: str, pipeline: str | None, status: str, error
     }
     if frappe.db.has_column(DT, "sr_dedupe_error"):
         values["sr_dedupe_error"] = error
+    if frappe.db.has_column(DT, "sr_dedupe_stage"):
+        stage_result = {
+            "Pending": ("Pending", None),
+            "Processing": ("Processing", None),
+            "Master": ("Completed", "Primary"),
+            "Duplicate": ("Completed", "Duplicate"),
+            "Skipped": ("Completed", "Skipped"),
+            "Failed": ("Failed", None),
+        }.get(status)
+        if stage_result:
+            values["sr_dedupe_stage"], values["sr_dedupe_result"] = stage_result
+        if status == "Processing":
+            values["sr_dedupe_started_at"] = now_datetime()
+            values["sr_dedupe_completed_at"] = None
+        elif status in {"Master", "Duplicate", "Skipped", "Failed"}:
+            values["sr_dedupe_completed_at"] = now_datetime()
     names = frappe.get_all(DT, filters=duplicate_filters(mobile_norm, pipeline), pluck="name", limit_page_length=0)
     if names:
         frappe.db.bulk_update(DT, {name: values for name in names}, update_modified=False)
+
+
+def _metadata_missing(row) -> list[str]:
+    missing = []
+    if cint(get_setting("crm_lead_dedupe_require_pipeline")) and not row.get("sr_lead_pipeline"):
+        missing.append("pipeline")
+    if cint(get_setting("crm_lead_dedupe_require_source")) and not row.get("source"):
+        missing.append("source")
+    return missing
+
+
+def _refresh_waiting_metadata(limit: int) -> int:
+    fields = ["name", "sr_dedupe_queued_at"]
+    for fieldname in ("sr_lead_pipeline", "source"):
+        if frappe.db.has_column(DT, fieldname):
+            fields.append(fieldname)
+    rows = frappe.get_all(
+        DT,
+        filters={"sr_dedupe_pending": 1, "sr_dedupe_stage": "Waiting for Metadata"},
+        fields=fields,
+        order_by="sr_dedupe_queued_at asc",
+        limit_page_length=limit,
+    )
+    now = now_datetime()
+    timeout = max(0, cint(get_setting("crm_lead_dedupe_metadata_wait_seconds")))
+    changed = 0
+    for row in rows:
+        missing = _metadata_missing(row)
+        if not missing:
+            frappe.db.set_value(
+                DT,
+                row.name,
+                {"sr_dedupe_stage": "Pending", "sr_dedupe_error": None},
+                update_modified=False,
+            )
+            changed += 1
+            continue
+        queued_at = get_datetime(row.get("sr_dedupe_queued_at")) if row.get("sr_dedupe_queued_at") else now
+        if timeout and (now - queued_at).total_seconds() < timeout:
+            continue
+        frappe.db.set_value(
+            DT,
+            row.name,
+            {
+                "sr_dedupe_pending": 0,
+                "sr_dedupe_status": "Failed",
+                "sr_dedupe_stage": "Failed",
+                "sr_dedupe_result": None,
+                "sr_dedupe_completed_at": now,
+                "sr_dedupe_checked_on": now,
+                "sr_dedupe_error": "Required metadata was not received: " + ", ".join(missing),
+            },
+            update_modified=False,
+        )
+        changed += 1
+    return changed
+
+
+def _finalize_group_state(mobile_norm: str, pipeline: str | None) -> None:
+    rows = frappe.get_all(
+        DT,
+        filters=duplicate_filters(mobile_norm, pipeline),
+        fields=["name", "sr_is_duplicate", "sr_is_archived", DUPLICATE_OF_FIELD, "sr_dedupe_stage"],
+        limit_page_length=0,
+    )
+    now = now_datetime()
+    updates = {}
+    for row in rows:
+        if row.get("sr_dedupe_stage") == "Failed":
+            continue
+        duplicate = bool(cint(row.get("sr_is_duplicate")) or row.get(DUPLICATE_OF_FIELD))
+        updates[row.name] = {
+            "sr_dedupe_pending": 0,
+            "sr_dedupe_status": "Duplicate" if duplicate else "Master",
+            "sr_dedupe_stage": "Completed",
+            "sr_dedupe_result": "Duplicate" if duplicate else "Primary",
+            "sr_dedupe_checked_on": now,
+            "sr_dedupe_completed_at": now,
+            "sr_dedupe_error": None,
+        }
+    if updates:
+        frappe.db.bulk_update(DT, updates, update_modified=False)
 
 
 def _write_merge_log(mobile_norm: str, master: str | None, duplicate: str | None, status: str, error: str | None = None):
@@ -273,7 +382,14 @@ def _merge_duplicate(master: str, duplicate: str, mobile_norm: str):
     return True
 
 
-def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int, pipeline: str | None = None) -> int:
+def process_mobile_group(
+    mobile_norm: str,
+    max_merges: int,
+    max_group_size: int,
+    pipeline: str | None = None,
+    *,
+    allow_merge: bool = True,
+) -> int:
     blocked = _blocked_mobiles()
     if not is_valid_auto_merge_mobile(mobile_norm, blocked):
         _set_group_status(mobile_norm, pipeline, "Skipped", "Unsafe or invalid mobile number")
@@ -283,11 +399,13 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
 
     lock_name = f"{MOBILE_LOCK_PREFIX}{mobile_norm}_{pipeline or ''}"
     with filelock(lock_name, timeout=0):
+        _set_group_status(mobile_norm, pipeline, "Processing", pending=1)
+        frappe.db.commit()
         rows = _group_rows(mobile_norm, pipeline)
         eligible_rows = [row for row in rows if is_merge_status_allowed(row)]
         if len(eligible_rows) <= 1:
             sync_duplicate_group(mobile_norm, pipeline)
-            _set_group_status(mobile_norm, pipeline, "Master")
+            _finalize_group_state(mobile_norm, pipeline)
             frappe.db.commit()
             return 0
 
@@ -306,6 +424,12 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
 
         master = primary.name
         owner_values = _owner_values_from_row(select_owner_source_row(eligible_rows))
+        if not allow_merge:
+            sync_duplicate_group(mobile_norm, pipeline)
+            _finalize_group_state(mobile_norm, pipeline)
+            frappe.db.commit()
+            return 0
+
         merged = 0
         for row in eligible_rows:
             if row.name == master:
@@ -325,7 +449,10 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
                     values = {
                         "sr_dedupe_pending": 0,
                         "sr_dedupe_status": "Failed",
+                        "sr_dedupe_stage": "Failed",
+                        "sr_dedupe_result": None,
                         "sr_dedupe_checked_on": now_datetime(),
+                        "sr_dedupe_completed_at": now_datetime(),
                     }
                     if frappe.db.has_column(DT, "sr_dedupe_error"):
                         values["sr_dedupe_error"] = error
@@ -347,7 +474,7 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
             sync_duplicate_group(mobile_norm, pipeline)
             _restore_owner_values(master, owner_values)
             _refresh_master_creation_from_newest(master, eligible_rows)
-            _set_group_status(mobile_norm, pipeline, "Master")
+            _finalize_group_state(mobile_norm, pipeline)
             frappe.db.commit()
         except Exception:
             frappe.db.rollback()
@@ -357,7 +484,7 @@ def process_mobile_group(mobile_norm: str, max_merges: int, max_group_size: int,
 
 
 def run_auto_merge_scheduler():
-    if not is_enabled("scheduler") or not is_enabled("merge"):
+    if not is_enabled("scheduler"):
         log_operation("auto_merge_scheduler.skipped", reason="disabled")
         return {"processed_groups": 0, "merged": 0, "skipped": "disabled"}
 
@@ -370,6 +497,10 @@ def run_auto_merge_scheduler():
     max_merges = _setting_int("crm_lead_dedupe_max_merges_per_run", 100)
     max_group_size = _setting_int("crm_lead_dedupe_max_group_size", 100)
     limit = min(max_pending, max_groups)
+    metadata_changed = _refresh_waiting_metadata(max_pending)
+    if metadata_changed:
+        frappe.db.commit()
+    allow_merge = is_enabled("merge")
 
     try:
         with filelock(GLOBAL_LOCK, timeout=0):
@@ -384,7 +515,13 @@ def run_auto_merge_scheduler():
                 mobile_norm = group.sr_mobile_norm
                 pipeline = group.get("sr_lead_pipeline")
                 try:
-                    merged += process_mobile_group(mobile_norm, max_merges - merged, max_group_size, pipeline)
+                    merged += process_mobile_group(
+                        mobile_norm,
+                        max_merges - merged,
+                        max_group_size,
+                        pipeline,
+                        allow_merge=allow_merge,
+                    )
                     processed_groups += 1
                 except LockTimeoutError:
                     log_operation("auto_merge_scheduler.group_locked", mobile_norm=mobile_norm)
@@ -394,7 +531,11 @@ def run_auto_merge_scheduler():
                     frappe.db.commit()
                     frappe.log_error(frappe.get_traceback(), "CRM Lead Auto Merge Group Failed")
 
-            result = {"processed_groups": processed_groups, "merged": merged}
+            result = {
+                "processed_groups": processed_groups,
+                "merged": merged,
+                "metadata_changed": metadata_changed,
+            }
             log_operation("auto_merge_scheduler.done", **result)
             return result
     except LockTimeoutError:
@@ -422,4 +563,9 @@ def run_auto_merge_scheduler_if_due():
 
     frappe.defaults.set_global_default(SCHEDULER_LAST_RUN_KEY, now)
     frappe.db.commit()
+    return run_auto_merge_scheduler()
+
+
+def run_delayed_dedupe_worker():
+    """Minute-level worker; per-lead not-before timestamps provide the configured delay."""
     return run_auto_merge_scheduler()
