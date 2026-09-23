@@ -14,6 +14,7 @@ from crm_lead_dedupe.leads.dup_utils import (
     duplicate_filters,
     is_merge_status_allowed,
     is_valid_auto_merge_mobile,
+    newest_primary_enabled,
     oldest_primary_enabled,
     pipeline_scope_enabled,
     select_owner_source_row,
@@ -343,6 +344,27 @@ def _restore_owner_values(master: str, values: dict):
     frappe.db.set_value(DT, master, values, update_modified=False)
 
 
+def _clear_master_assignment(master: str):
+    """Clear the owner and assignment helpers after a primary-mode merge."""
+    if "new_assignement_system" in frappe.get_installed_apps():
+        from new_assignement_system.engine.service import clear_lead_assignment
+
+        clear_lead_assignment(
+            master,
+            reason="CRM Lead retained as primary after duplicate merge",
+            triggered_by="CRM Lead Dedupe",
+        )
+        return
+
+    from frappe.desk.form.assign_to import clear
+
+    clear(DT, master, ignore_permissions=True)
+    values = {"lead_owner": None, "_assign": "[]"}
+    if frappe.db.has_column(DT, "team"):
+        values["team"] = None
+    frappe.db.set_value(DT, master, values, update_modified=False)
+
+
 def _refresh_master_creation_from_newest(master: str, rows):
     if not oldest_primary_enabled() or not rows or not frappe.db.exists(DT, master):
         return
@@ -475,6 +497,13 @@ def process_mobile_group(
             _restore_owner_values(master, owner_values)
             _refresh_master_creation_from_newest(master, eligible_rows)
             _finalize_group_state(mobile_norm, pipeline)
+            if merged and (oldest_primary_enabled() or newest_primary_enabled()):
+                remaining = [
+                    row for row in _group_rows(mobile_norm, pipeline)
+                    if is_merge_status_allowed(row)
+                ]
+                if len(remaining) == 1 and remaining[0].name == master:
+                    _clear_master_assignment(master)
             frappe.db.commit()
         except Exception:
             frappe.db.rollback()

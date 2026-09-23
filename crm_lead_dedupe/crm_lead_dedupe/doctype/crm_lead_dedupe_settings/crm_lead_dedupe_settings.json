@@ -115,14 +115,14 @@
     },
     {
       "default": "0",
-      "description": "When enabled, the newest active CRM Lead becomes the primary record during sync and merge, so repeat callers come up in recent lists.",
+      "description": "When enabled, the newest active CRM Lead becomes the primary record during sync and merge, so repeat callers come up in recent lists. After automatic merging completes for the group, the primary owner and assignments are cleared.",
       "fieldname": "crm_lead_dedupe_newest_primary_enabled",
       "fieldtype": "Check",
       "label": "Use Newest Lead As Primary"
     },
     {
       "default": "0",
-      "description": "When enabled, the oldest eligible active CRM Lead becomes the primary record during sync and merge. The primary creation time is refreshed from the newest merged lead.",
+      "description": "When enabled, the oldest eligible active CRM Lead becomes the primary record during sync and merge. The primary creation time is refreshed from the newest merged lead. After automatic merging completes for the group, the primary owner and assignments are cleared.",
       "fieldname": "crm_lead_dedupe_oldest_primary_enabled",
       "fieldtype": "Check",
       "label": "Use Old Lead As Primary"
