@@ -4,6 +4,8 @@ import time
 import frappe
 from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.perm import require_dedupe_manager
+from crm_lead_dedupe.logging import mask_text
+from crm_lead_dedupe.privacy import browser_response
 
 from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_OF_FIELD,
@@ -268,12 +270,14 @@ def _as_bool(value) -> bool:
 
 
 def _log_backfill(message: str, log_to_console: bool = True) -> None:
+    message = mask_text(message)
     frappe.logger(LOGGER_NAME).info(message)
     if _as_bool(log_to_console):
         print(f"[{LOGGER_NAME}] {message}")
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def reset_backfill_progress():
     require_dedupe_manager()
     for key in (
@@ -401,7 +405,8 @@ def backfill_mobile_norm():
         pass
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def clear_legacy_duplicate_links_batched(
     batch_size: int = 5000,
     reset: bool = False,
@@ -469,7 +474,8 @@ def clear_legacy_duplicate_links_batched(
     return result
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def backfill_mobile_norm_batched(
     batch_size: int = 2000,
     reset: bool = False,
@@ -557,7 +563,8 @@ def backfill_mobile_norm_batched(
     return result
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def sync_duplicate_groups_batched(
     batch_size: int = 500,
     reset: bool = False,
@@ -650,7 +657,8 @@ def sync_duplicate_groups_batched(
     return result
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def run_backfill_batch(
     legacy_batch_size: int = 5000,
     normalize_batch_size: int = 2000,
@@ -698,7 +706,8 @@ def run_backfill_batch(
     return result
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def run_backfill_until_done(
     legacy_batch_size: int = 5000,
     normalize_batch_size: int = 5000,

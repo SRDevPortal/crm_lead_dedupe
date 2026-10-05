@@ -32,3 +32,7 @@ Pre-commit is configured to use the following tools for checking and formatting 
 
 mit
 
+## Customer number privacy
+
+When privacy_shield is enabled, duplicate matching and merging continue to use original numbers on the server. Restricted users receive masked mobile and phone values in the duplicate modal and custom API responses. Raw auto-merge logs and blocked-number settings require full-number visibility, and operational logs mask phone-like values before writing them.
+

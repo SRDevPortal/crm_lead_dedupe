@@ -8,8 +8,10 @@ frappe.ui.form.on('CRM Lead', {
     // Proactively clear a stale "Duplicate Of" so server link validation can't fail
     if (frm.doc.sr_duplicate_of_name || frm.doc.sr_duplicate_of) {
       try {
-        await frappe.call('crm_lead_dedupe.api.dup_fix.fix_duplicate_of_if_stale', {
-          name: frm.doc.name || ''
+        await frappe.call({
+          method: 'crm_lead_dedupe.api.dup_fix.fix_duplicate_of_if_stale',
+          type: 'POST',
+          args: { name: frm.doc.name || '' },
         });
       } catch (e) {
         // non-fatal; save will proceed

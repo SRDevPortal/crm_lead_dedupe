@@ -1,10 +1,12 @@
 import frappe
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.privacy import browser_response, require_full_number_visibility
 from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.dup_utils import norm_mobile, pipeline_scope_enabled, sync_duplicate_group
 from crm_lead_dedupe.leads.perm import require_dedupe_manager
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def backfill_archive_mobile_pipeline_groups():
     require_dedupe_manager()
     if not is_enabled("archive"):
@@ -38,9 +40,11 @@ def _archive_group(mobile_norm: str | None):
     sync_duplicate_group(mobile_norm)
     log_operation("archive_group.done", mobile_norm=mobile_norm)
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def archive_group_for_mobile_pipeline(mobile: str | None = None, pipeline: str | None = None):
     require_dedupe_manager()
+    require_full_number_visibility()
     if not is_enabled("archive"):
         log_operation("archive_group_for_mobile_pipeline.skipped", mobile=mobile, pipeline=pipeline, reason="archive_disabled")
         return "skipped"

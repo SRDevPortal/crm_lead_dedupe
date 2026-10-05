@@ -22,6 +22,8 @@ from crm_lead_dedupe.leads.dup_utils import (
     sync_duplicate_group,
 )
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.leads.perm import require_dedupe_manager
+from crm_lead_dedupe.privacy import browser_response
 from crm_lead_dedupe.settings import get_setting, is_enabled
 
 
@@ -97,9 +99,11 @@ def _pending_mobile_groups(limit: int) -> list[frappe._dict]:
     return rows
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def queue_historical_duplicate_groups(batch_size: int = 500, reset: bool = False):
     """Mark old duplicate mobile groups pending so the 5-minute scheduler can merge them safely."""
+    require_dedupe_manager()
     if not is_enabled("scheduler") or not _has_required_columns():
         return {"queued_groups": 0, "done": True, "skipped": "disabled_or_missing_columns"}
 

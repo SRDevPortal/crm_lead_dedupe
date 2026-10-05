@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 from frappe.model.rename_doc import rename_doc
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.privacy import browser_response
 from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_OF_FIELD,
@@ -108,7 +109,8 @@ def _refresh_primary_creation_from_rows(primary: str, rows):
             (newest.creation, primary),
         )
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def merge_crm_leads(primary: str, duplicates):
     require_dedupe_manager()
     if not is_enabled("merge"):

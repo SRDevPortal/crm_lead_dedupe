@@ -1,6 +1,7 @@
 import frappe
 from crm.api.doc import get_data as crm_get_data
 from crm_lead_dedupe.settings import is_enabled
+from crm_lead_dedupe.privacy import browser_response
 
 
 ACTIVE_FILTERS = {"sr_is_archived": 0, "converted": 0}
@@ -30,6 +31,7 @@ def force_active_crm_lead_filters(doctype, filters=None, default_filters=None):
 
 
 @frappe.whitelist()
+@browser_response
 def get_data(
     doctype: str,
     filters: dict,

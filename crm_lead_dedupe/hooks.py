@@ -27,11 +27,18 @@ override_whitelisted_methods = {
 
 permission_query_conditions = {
     "CRM Lead": "crm_lead_dedupe.leads.perm.pqc_crm_lead",
+    "CRM Lead Auto Merge Log": "crm_lead_dedupe.privacy.query_condition",
+    "CRM Lead Dedupe Settings": "crm_lead_dedupe.privacy.query_condition",
 }
 
 has_permission = {
     "CRM Lead": "crm_lead_dedupe.leads.perm.crm_lead_has_permission",
+    "CRM Lead Auto Merge Log": "crm_lead_dedupe.privacy.has_permission",
+    "CRM Lead Dedupe Settings": "crm_lead_dedupe.privacy.has_permission",
 }
+
+before_request = ["crm_lead_dedupe.privacy.guard_request"]
+auth_hooks = ["crm_lead_dedupe.privacy.guard_request"]
 
 # Compute dedupe on save
 doc_events = {

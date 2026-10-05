@@ -2,6 +2,7 @@ import hashlib
 import frappe
 from frappe.utils import cint
 from crm_lead_dedupe.logging import log_operation
+from crm_lead_dedupe.privacy import browser_response
 from crm_lead_dedupe.settings import is_enabled
 from crm_lead_dedupe.leads.dup_utils import (
     DUPLICATE_THRESHOLD,
@@ -152,6 +153,7 @@ def _summary(name: str, columns=None) -> dict:
     return summary
 
 @frappe.whitelist()
+@browser_response
 def get_duplicates_for_crm_lead(lead_name: str, columns=None):
     """
     Duplicates by normalized mobile, excluding the primary.
@@ -199,6 +201,7 @@ def get_duplicates_for_crm_lead(lead_name: str, columns=None):
 
 
 @frappe.whitelist()
+@browser_response
 def get_hit_counts_for_crm_leads(lead_names):
     names = _as_list(lead_names)
     if not names:
@@ -278,7 +281,8 @@ def get_hit_counts_for_crm_leads(lead_names):
     return response
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
+@browser_response
 def acknowledge_duplicate_hit(lead_name: str):
     log_operation("acknowledge_duplicate_hit.start", lead_name=lead_name)
     if not is_enabled("ui"):

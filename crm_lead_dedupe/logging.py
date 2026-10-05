@@ -1,4 +1,5 @@
 import json
+import re
 
 import frappe
 from crm_lead_dedupe.settings import get_setting
@@ -7,13 +8,38 @@ from crm_lead_dedupe.settings import get_setting
 LOGGER_NAME = "crm_lead_dedupe"
 
 
+PHONE_TEXT = re.compile(r"(?<![0-9*])\+?[0-9](?:[0-9 ()+.-]*[0-9])?(?![0-9*])")
+
+
+def mask_text(value):
+    if not isinstance(value, str):
+        return value
+
+    def replace(match):
+        token = match.group(0)
+        digits = "".join(character for character in token if character.isdigit())
+        if len(digits) < 7:
+            return token
+        return ("*" * max(len(digits) - 4, 1)) + digits[-4:]
+
+    return PHONE_TEXT.sub(replace, value)
+
+
+def _sanitize(value):
+    if isinstance(value, dict):
+        return {key: _sanitize(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize(item) for item in value]
+    return mask_text(value)
+
+
 def _json_default(value):
     return str(value)
 
 
 def _compact_context(context):
     compacted = {}
-    for key, value in context.items():
+    for key, value in _sanitize(context).items():
         if value is None:
             continue
         if isinstance(value, (list, tuple, set)):

@@ -385,8 +385,10 @@ async function openCRMLeadDuplicatesDialog({ primary_name }) {
         columns: canCustomizeColumns ? _ld_backend_column_keys() : _ld_default_column_keys(),
       }
     );
-    frappe.call('crm_lead_dedupe.api.crm_lead_duplicates.acknowledge_duplicate_hit', {
-      lead_name: primary_name,
+    frappe.call({
+      method: 'crm_lead_dedupe.api.crm_lead_duplicates.acknowledge_duplicate_hit',
+      type: 'POST',
+      args: { lead_name: primary_name },
     }).then(() => {
       if (frappe.listview_settings && window.cur_list && window.cur_list.doctype === 'CRM Lead') {
         window.cur_list.refresh();
@@ -451,9 +453,13 @@ async function openCRMLeadDuplicatesDialog({ primary_name }) {
       const names = Array.from(_ld_checked_names(d.$body, []));
 
       if (!names.length) return frappe.msgprint('Select at least one row to merge.');
-      await frappe.call('crm_lead_dedupe.api.crm_lead_merge.merge_crm_leads', {
-        primary: primary_name,
-        duplicates: names
+      await frappe.call({
+        method: 'crm_lead_dedupe.api.crm_lead_merge.merge_crm_leads',
+        type: 'POST',
+        args: {
+          primary: primary_name,
+          duplicates: names,
+        },
       });
       d.hide();
       frappe.show_alert({ message: 'Merged successfully', indicator: 'green' });
