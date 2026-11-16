@@ -19,6 +19,7 @@
     "crm_lead_dedupe_newest_primary_enabled",
     "crm_lead_dedupe_oldest_primary_enabled",
     "crm_lead_dedupe_merge_statuses",
+    "incoming_call_treat_as_new_statuses",
     "section_scheduler",
     "crm_lead_dedupe_max_pending_leads",
     "crm_lead_dedupe_max_mobile_groups",
@@ -132,6 +133,13 @@
       "fieldname": "crm_lead_dedupe_merge_statuses",
       "fieldtype": "Table MultiSelect",
       "label": "Statuses Eligible For Merge",
+      "options": "CRM Lead Dedupe Merge Status"
+    },
+    {
+      "description": "Incoming calls from leads in these statuses use the new-caller routing flow. Leave empty to keep existing-lead routing. Independent of statuses eligible for merge.",
+      "fieldname": "incoming_call_treat_as_new_statuses",
+      "fieldtype": "Table MultiSelect",
+      "label": "Incoming Call Treat As New Statuses",
       "options": "CRM Lead Dedupe Merge Status"
     },
     {

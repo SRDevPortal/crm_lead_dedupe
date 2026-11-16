@@ -106,6 +106,21 @@ def merge_statuses() -> set[str]:
     return {str(status).strip() for status in parts if str(status).strip()}
 
 
+def incoming_call_treat_as_new_statuses() -> set[str]:
+    """Return only explicitly configured incoming-call statuses, independent of merge rules."""
+    rows = frappe.get_all(
+        "CRM Lead Dedupe Merge Status",
+        filters={
+            "parent": "CRM Lead Dedupe Settings",
+            "parenttype": "CRM Lead Dedupe Settings",
+            "parentfield": "incoming_call_treat_as_new_statuses",
+        },
+        pluck="crm_lead_status",
+        order_by="idx asc",
+    )
+    return {str(status).strip() for status in rows if status and str(status).strip()}
+
+
 def is_merge_status_allowed(row) -> bool:
     statuses = merge_statuses()
     if not statuses:
