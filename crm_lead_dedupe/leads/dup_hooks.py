@@ -1,6 +1,7 @@
 from hashlib import sha256
 
 import frappe
+from crm_lead_dedupe import reconciliation
 from frappe.utils import add_to_date, cint, now_datetime
 from crm_lead_dedupe.logging import log_operation
 from crm_lead_dedupe.settings import get_setting, is_enabled
@@ -77,7 +78,7 @@ def _mark_pending_group(mobile_norm: str | None, pipeline: str | None = None):
                 "sr_dedupe_completed_at": None,
             }
         )
-    frappe.db.bulk_update("CRM Lead", {name: values for name in names}, update_modified=False)
+    reconciliation.bulk_update("CRM Lead", {name: values for name in names}, update_modified=False)
 
 
 def _input_hash(doc) -> str:

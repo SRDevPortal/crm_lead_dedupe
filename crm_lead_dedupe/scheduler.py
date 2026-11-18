@@ -1,4 +1,5 @@
 import frappe
+from crm_lead_dedupe import reconciliation
 from frappe.model.rename_doc import rename_doc
 from frappe.utils import cint, get_datetime, now_datetime
 from frappe.utils.file_lock import LockTimeoutError
@@ -208,7 +209,7 @@ def _set_group_status(mobile_norm: str, pipeline: str | None, status: str, error
             values["sr_dedupe_completed_at"] = now_datetime()
     names = frappe.get_all(DT, filters=duplicate_filters(mobile_norm, pipeline), pluck="name", limit_page_length=0)
     if names:
-        frappe.db.bulk_update(DT, {name: values for name in names}, update_modified=False)
+        reconciliation.bulk_update(DT, {name: values for name in names}, update_modified=False)
 
 
 def _metadata_missing(row) -> list[str]:
@@ -238,7 +239,7 @@ def _refresh_waiting_metadata(limit: int) -> int:
     for row in rows:
         missing = _metadata_missing(row)
         if not missing:
-            frappe.db.set_value(
+            reconciliation.set_value(
                 DT,
                 row.name,
                 {"sr_dedupe_stage": "Pending", "sr_dedupe_error": None},
@@ -249,7 +250,7 @@ def _refresh_waiting_metadata(limit: int) -> int:
         queued_at = get_datetime(row.get("sr_dedupe_queued_at")) if row.get("sr_dedupe_queued_at") else now
         if timeout and (now - queued_at).total_seconds() < timeout:
             continue
-        frappe.db.set_value(
+        reconciliation.set_value(
             DT,
             row.name,
             {
@@ -290,7 +291,7 @@ def _finalize_group_state(mobile_norm: str, pipeline: str | None) -> None:
             "sr_dedupe_error": None,
         }
     if updates:
-        frappe.db.bulk_update(DT, updates, update_modified=False)
+        reconciliation.bulk_update(DT, updates, update_modified=False)
 
 
 def _write_merge_log(mobile_norm: str, master: str | None, duplicate: str | None, status: str, error: str | None = None):
@@ -345,7 +346,7 @@ def _restore_owner_values(master: str, values: dict):
     if not values or not frappe.db.exists(DT, master):
         return
 
-    frappe.db.set_value(DT, master, values, update_modified=False)
+    reconciliation.set_value(DT, master, values, update_modified=False)
 
 
 def _clear_master_assignment(master: str):
@@ -366,7 +367,7 @@ def _clear_master_assignment(master: str):
     values = {"lead_owner": None, "_assign": "[]"}
     if frappe.db.has_column(DT, "team"):
         values["team"] = None
-    frappe.db.set_value(DT, master, values, update_modified=False)
+    reconciliation.set_value(DT, master, values, update_modified=False)
 
 
 def _refresh_master_creation_from_newest(master: str, rows):
@@ -403,7 +404,7 @@ def _merge_duplicate(master: str, duplicate: str, mobile_norm: str):
         values[LEGACY_DUPLICATE_OF_FIELD] = None
     if frappe.db.has_column(DT, "sr_dedupe_error"):
         values["sr_dedupe_error"] = None
-    frappe.db.set_value(DT, master, values, update_modified=False)
+    reconciliation.set_value(DT, master, values, update_modified=False)
     _write_merge_log(mobile_norm, master, duplicate, "Merged")
     return True
 
@@ -482,7 +483,7 @@ def process_mobile_group(
                     }
                     if frappe.db.has_column(DT, "sr_dedupe_error"):
                         values["sr_dedupe_error"] = error
-                    frappe.db.set_value(
+                    reconciliation.set_value(
                         DT,
                         row.name,
                         values,

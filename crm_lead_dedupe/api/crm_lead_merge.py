@@ -1,4 +1,5 @@
 import frappe
+from crm_lead_dedupe import reconciliation
 from frappe import _
 from frappe.model.rename_doc import rename_doc
 from crm_lead_dedupe.logging import log_operation
@@ -95,7 +96,7 @@ def _owner_values_from_row(row) -> dict:
 
 def _restore_owner_values(name: str, values: dict):
     if values and frappe.db.exists("CRM Lead", name):
-        frappe.db.set_value("CRM Lead", name, values, update_modified=False)
+        reconciliation.set_value("CRM Lead", name, values, update_modified=False)
 
 
 def _refresh_primary_creation_from_rows(primary: str, rows):
@@ -155,7 +156,7 @@ def merge_crm_leads(primary: str, duplicates):
     }
     if frappe.db.has_column("CRM Lead", LEGACY_DUPLICATE_OF_FIELD):
         values[LEGACY_DUPLICATE_OF_FIELD] = None
-    frappe.db.set_value("CRM Lead", primary, values, update_modified=False)
+    reconciliation.set_value("CRM Lead", primary, values, update_modified=False)
     _restore_owner_values(primary, owner_values)
     _refresh_primary_creation_from_rows(primary, merge_rows)
 

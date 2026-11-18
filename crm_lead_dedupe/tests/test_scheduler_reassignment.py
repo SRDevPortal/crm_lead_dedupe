@@ -36,6 +36,8 @@ class TestPrimaryReassignment(TestCase):
         )
         with (
             patch.object(scheduler, "frappe", fake_frappe),
+            patch("crm_lead_dedupe.reconciliation.frappe", fake_frappe),
+            patch("crm_lead_dedupe.reconciliation.notify"),
             patch.object(scheduler, "_blocked_mobiles", return_value=set()),
             patch.object(scheduler, "filelock", return_value=nullcontext()),
             patch.object(scheduler, "_group_rows", side_effect=[rows, remaining]),
@@ -110,6 +112,8 @@ class TestClearMasterAssignment(TestCase):
         )
         with (
             patch.object(scheduler, "frappe", fake_frappe),
+            patch("crm_lead_dedupe.reconciliation.frappe", fake_frappe),
+            patch("crm_lead_dedupe.reconciliation.notify"),
             patch.dict("sys.modules", {"new_assignement_system.engine.service": service}),
         ):
             scheduler._clear_master_assignment("TEST-OLDER")
@@ -127,6 +131,8 @@ class TestClearMasterAssignment(TestCase):
                 fake_frappe.db.has_column.return_value = has_team
                 with (
                     patch.object(scheduler, "frappe", fake_frappe),
+            patch("crm_lead_dedupe.reconciliation.frappe", fake_frappe),
+            patch("crm_lead_dedupe.reconciliation.notify"),
                     patch("frappe.desk.form.assign_to.clear") as clear,
                 ):
                     scheduler._clear_master_assignment("TEST-OLDER")

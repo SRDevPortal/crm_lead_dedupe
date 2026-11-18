@@ -1,4 +1,5 @@
 import frappe
+from crm_lead_dedupe import reconciliation
 from frappe import _
 from crm_lead_dedupe.logging import log_operation
 from crm_lead_dedupe.privacy import browser_response
@@ -58,7 +59,7 @@ def fix_duplicate_of_if_stale(name: str):
         }
         if frappe.db.has_column("CRM Lead", LEGACY_DUPLICATE_OF_FIELD):
             values[LEGACY_DUPLICATE_OF_FIELD] = None
-        frappe.db.set_value("CRM Lead", name, values, update_modified=False)
+        reconciliation.set_value("CRM Lead", name, values, update_modified=False)
         frappe.db.commit()
         log_operation("fix_duplicate_of_if_stale.cleared", lead_name=name, duplicate_of=dup)
     else:

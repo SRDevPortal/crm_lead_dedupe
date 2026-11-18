@@ -1,5 +1,6 @@
 import re
 import frappe
+from crm_lead_dedupe import reconciliation
 from frappe.utils import cint, now_datetime
 from crm_lead_dedupe.logging import log_operation
 from crm_lead_dedupe.settings import get_setting, is_enabled
@@ -303,12 +304,9 @@ def _candidate_json(candidates) -> str | None:
 def _bulk_update(doc_updates: dict[str, dict]):
     if not doc_updates:
         return
-
-    try:
-        frappe.db.bulk_update(DT, doc_updates, update_modified=False)
-    except Exception:
-        for name, values in doc_updates.items():
-            frappe.db.set_value(DT, name, values, update_modified=False)
+    # A deadlock or failed outbox signal must abort the original transaction.
+    # Retrying individual rows here could hide a rollback of earlier group work.
+    reconciliation.bulk_update(DT, doc_updates, update_modified=False)
 
 
 def _duplicate_link_values(value: str | None = None) -> dict:
